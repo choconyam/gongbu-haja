@@ -1,0 +1,12 @@
+# 줄바꿈 정규화 기본값
+* text=auto
+
+# cmd.exe는 LF 전용 배치 파일을 오파싱해 조용히 실패한다.
+# 어떤 git 설정으로 clone해도 .bat은 반드시 CRLF로 체크아웃한다.
+*.bat text eol=crlf
+
+# 스크립트와 문서는 플랫폼 무관하게 LF로 저장한다.
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.txt text eol=lf

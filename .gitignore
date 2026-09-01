@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# 사용자 강의 원본과 실행 산출물은 저장소에 올리지 않는다.
+input/
+workspace/*
+!workspace/README.md
+
+# 로컬 전사 모델과 LaTeX 중간 산출물
+models/
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+

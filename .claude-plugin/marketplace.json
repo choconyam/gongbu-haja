@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace-manifest.json",
+  "name": "gongbu-haja",
+  "owner": {
+    "name": "choconyam",
+    "url": "https://github.com/choconyam"
+  },
+  "description": "gongbu-haja — 강의 자료를 밀도 있는 학습노트로 바꾸는 다중 에이전트 파이프라인 설치.",
+  "plugins": [
+    {
+      "name": "gongbu-haja",
+      "source": "./",
+      "description": "강의 교안·녹음을 빈틈없이 통합해 근거 추적이 가능한 밀도 있는 학습노트를 만든다.",
+      "license": "MIT",
+      "keywords": ["korean", "study-notes", "lecture", "transcription", "whisper", "education", "multi-agent"]
+    }
+  ]
+}

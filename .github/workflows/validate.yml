@@ -1,0 +1,25 @@
+name: validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      # 외부 패키지 설치 없이 표준 라이브러리만으로 실행된다.
+      # (faster-whisper·av가 필요한 테스트는 스스로 건너뛴다.)
+      - name: 프로젝트 구조 검증
+        run: python scripts/validate_agent_setup.py --strict
+      - name: 단위 테스트
+        run: python -m unittest scripts.test_manage_run scripts.test_validate_note_output scripts.test_transcribe_lecture scripts.test_transcribe_batch -v

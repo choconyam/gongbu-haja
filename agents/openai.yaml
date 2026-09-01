@@ -1,0 +1,4 @@
+interface:
+  display_name: "gongbu-haja"
+  short_description: "강의 교안·녹음을 밀도 있는 학습노트로 통합"
+  default_prompt: "Use $gongbu-haja to build a dense, traceable Korean study note from the lecture materials in this folder."
