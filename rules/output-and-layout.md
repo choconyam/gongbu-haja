@@ -87,6 +87,17 @@ Use this only when page-level traceability is part of the goal.
 - Refer to actual elements in the image: top equation, right graph, lower-left note, and so on.
 - Do not merge different source pages into one page-numbered section unless the user requests conceptual consolidation.
 
+### Slide-First Explanation — Default for lecture handouts
+
+When a lecture slide PDF and instructor explanation are both available, use this student-facing order unless the user asks for a concept-consolidated note:
+
+1. place one original slide page image at the top of the note page;
+2. put the explanation for that slide immediately below it;
+3. continue overflow explanation before showing the next slide;
+4. then repeat with the next original slide page.
+
+Keep administrative slides brief, but include every original page when the user asks to retain the handout. Do not print internal traceability strings such as `(PDF 15쪽; 강의 00:19:58-00:20:46)` in the student-facing artifact unless explicitly requested. Page and timestamp mappings remain in the internal source map.
+
 ## Callouts
 
 Use callouts sparingly and by function:

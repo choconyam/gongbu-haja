@@ -11,10 +11,59 @@ import wave
 from argparse import Namespace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import transcribe_lecture as tl  # noqa: E402
+
+
+class NvidiaDllDiscoveryTests(unittest.TestCase):
+    def test_discovers_all_installed_nvidia_bin_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            system_site = root / "system-site"
+            user_site = root / "user-site"
+            cublas_bin = system_site / "nvidia" / "cublas" / "bin"
+            cudnn_bin = user_site / "nvidia" / "cudnn" / "bin"
+            cublas_bin.mkdir(parents=True)
+            cudnn_bin.mkdir(parents=True)
+            (cublas_bin / "cublas64_12.dll").write_bytes(b"dll")
+            (cudnn_bin / "cudnn64_9.dll").write_bytes(b"dll")
+
+            with (
+                patch.object(tl.os, "name", "nt"),
+                patch.object(tl.site, "getsitepackages", return_value=[str(system_site)]),
+                patch.object(tl.site, "getusersitepackages", return_value=str(user_site)),
+            ):
+                discovered = tl.discover_nvidia_dll_dirs()
+
+            self.assertEqual((cublas_bin.resolve(), cudnn_bin.resolve()), discovered)
+
+    def test_registration_keeps_handles_and_only_changes_process_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            first = Path(temporary) / "nvidia" / "cublas" / "bin"
+            second = Path(temporary) / "nvidia" / "cudnn" / "bin"
+            first.mkdir(parents=True)
+            second.mkdir(parents=True)
+            handles = [object(), object()]
+
+            with (
+                patch.object(tl, "discover_nvidia_dll_dirs", return_value=(first, second)),
+                patch.object(tl.os, "add_dll_directory", side_effect=handles),
+                patch.object(tl, "_NVIDIA_DLL_DIR_HANDLES", []),
+                patch.dict(tl.os.environ, {"PATH": "existing"}, clear=False),
+            ):
+                registered = tl.add_nvidia_dll_dirs()
+                process_path = tl.os.environ["PATH"]
+                kept_handles = list(tl._NVIDIA_DLL_DIR_HANDLES)
+
+            self.assertEqual((first, second), registered)
+            self.assertEqual(handles, kept_handles)
+            self.assertEqual(
+                [str(first), str(second), "existing"],
+                process_path.split(tl.os.pathsep),
+            )
 
 
 class TranscriptionPlanTests(unittest.TestCase):

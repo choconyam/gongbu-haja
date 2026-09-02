@@ -1,0 +1,2 @@
+# Windows 시스템 오디오(WASAPI loopback) 녹음
+PyAudioWPatch>=0.2.12.7,<0.3

@@ -155,11 +155,14 @@ class ManageRunTests(unittest.TestCase):
             result = self.run_cli("init", str(inputs), "--lecture-id", "minimal", "--root", str(root))
             state_file = Path(result.stdout.strip())
 
-            for role in ("source_mapper", "writer", "layout_builder", "final_reviewer", "maintainer"):
+            for role in ("source_mapper", "writer", "layout_builder", "final_reviewer"):
                 artifact = state_file.parent / f"{role}.txt"
                 artifact.write_text(role, encoding="utf-8")
                 self.run_cli("start", str(state_file), "--role", role)
                 self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
+
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual("skipped", state["roles"]["maintainer"]["status"])
 
             self.run_cli("verify", str(state_file), "--check-inputs")
             source.write_bytes(b"changed-pdf")
@@ -170,6 +173,59 @@ class ManageRunTests(unittest.TestCase):
             artifact.write_text("changed-writer", encoding="utf-8")
             result = self.run_cli("verify", str(state_file), expected=1)
             self.assertIn("변경되었거나 누락된 산출물", result.stdout)
+
+    def test_rerun_only_invalidates_selected_role_and_descendants(self) -> None:
+        # 조판 취향만 바뀌면 매핑·집필을 반복하지 않고 조판 이후만 다시 실행한다.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli("init", str(inputs), "--lecture-id", "rerun", "--root", str(root))
+            state_file = Path(result.stdout.strip())
+
+            for role in ("source_mapper", "writer", "layout_builder", "final_reviewer"):
+                artifact = state_file.parent / f"{role}.txt"
+                artifact.write_text(role, encoding="utf-8")
+                self.run_cli("start", str(state_file), "--role", role)
+                self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
+
+            self.run_cli(
+                "rerun",
+                str(state_file),
+                "--role",
+                "layout_builder",
+                "--reason",
+                "교안 순서형 조판으로 변경",
+            )
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual("passed", state["roles"]["source_mapper"]["status"])
+            self.assertEqual("passed", state["roles"]["writer"]["status"])
+            self.assertEqual("ready", state["roles"]["layout_builder"]["status"])
+            self.assertEqual("blocked", state["roles"]["final_reviewer"]["status"])
+
+    def test_maintainer_is_optional_and_can_be_activated(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli("init", str(inputs), "--lecture-id", "delivery", "--root", str(root))
+            state_file = Path(result.stdout.strip())
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertFalse(state["roles"]["maintainer"]["active"])
+
+            self.run_cli(
+                "activate",
+                str(state_file),
+                "--role",
+                "maintainer",
+                "--reason",
+                "복수 파일 패키징 필요",
+            )
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertTrue(state["roles"]["maintainer"]["active"])
+            self.assertEqual(["final_reviewer"], state["roles"]["maintainer"]["dependencies"])
 
     def test_refresh_inputs_invalidates_affected_pipeline(self) -> None:
         # 새 교안이 들어오면 수동 JSON 삭제 없이 자료 매핑부터 다시 실행해야 한다.

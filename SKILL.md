@@ -3,9 +3,10 @@ name: gongbu-haja
 description: |
   강의 교안·녹음·전사본을 통합해 근거 추적이 가능한 밀도 있는 학습노트를 만든다.
   Use when the user asks to build study notes from lecture materials (교안, 강의
-  PDF, 슬라이드, 녹음, 전사본), to transcribe a lecture recording locally, or to
-  audit and revise existing lecture notes. Works from any folder: the current
-  folder's course materials become the input.
+  PDF, 슬라이드, 녹음, 전사본), to record authorized lecture playback on Windows,
+  to transcribe a lecture recording locally, or to audit and revise existing
+  lecture notes. Works from any folder: the current folder's course materials
+  become the input.
 license: MIT
 metadata:
   version: "1.0.0"
@@ -40,6 +41,8 @@ git clone https://github.com/choconyam/gongbu-haja "$HOME/gongbu-haja"
 ## 3. 실행
 
 엔진의 `AGENTS.md`를 읽고 그 지침을 그대로 따른다. 관리자 역할 수행, 역할별 담당 실행, `scripts/manage_run.py` 상태 관리, 검증 게이트 전부 저장소 문서가 기준이며 이 스킬이 별도 규칙을 추가하지 않는다. 중간 산출물은 엔진의 `workspace/<강의ID>/`에 만들고, 최종 학습노트는 사용자가 지정한 위치(기본값: 호출한 과목 폴더)로 전달한다.
+
+사용자가 현재 PC에서 재생되는 온라인 강의의 녹음을 명시적으로 요청했다면 엔진의 `scripts/record_lecture.py`와 `rules/transcription-workflow.md`를 따르고, `--output`에는 호출한 과목 폴더 안의 충돌 없는 새 WAV 경로를 넘긴다. 대면 수업이나 주변 마이크 녹음은 수행하지 않는다. 사이트 열기와 로그인·2단계 인증은 사용자가 직접 처리하고, 접근 제어나 DRM을 우회하지 않는다. 특정 학교명, 사이트 URL, 계정·인증 정보, 쿠키, 세션, 브라우저 프로필은 프로젝트 파일이나 로그에 저장하거나 Git/GitHub에 커밋하지 않는다.
 
 ## 경계
 

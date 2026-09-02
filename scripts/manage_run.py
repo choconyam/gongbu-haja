@@ -50,7 +50,14 @@ ROLE_ORDER = (
     "maintainer",
 )
 ROLE_PROMPTS = {role: f"agent_prompts/{role}.md" for role in ROLE_ORDER}
-OPTIONAL_ROLES = {"transcriber", "transcript_auditor", "instructor_integrator", "formula_code_checker", "pedagogy_editor"}
+OPTIONAL_ROLES = {
+    "transcriber",
+    "transcript_auditor",
+    "instructor_integrator",
+    "formula_code_checker",
+    "pedagogy_editor",
+    "maintainer",
+}
 INPUT_KINDS = {"audio", "transcript", "code", "document", "image", "text", "other"}
 
 TRANSCRIPT_EXTENSIONS = {".srt", ".vtt"}
@@ -269,7 +276,11 @@ def make_roles(items: list[dict[str, Any]], output_format: str) -> dict[str, dic
             layout_dependencies.append(role)
     roles["layout_builder"] = role_entry(True, f"{output_format} 최종 형식 생성", layout_dependencies)
     roles["final_reviewer"] = role_entry(True, "독립 최종 검수", ["layout_builder"])
-    roles["maintainer"] = role_entry(True, "통과 산출물 전달 정리", ["final_reviewer"])
+    roles["maintainer"] = role_entry(
+        False,
+        "복수 최종 파일의 이동·패키징·전달 정리가 필요할 때만 활성화",
+        ["final_reviewer"],
+    )
 
     for name, entry in roles.items():
         entry["prompt"] = ROLE_PROMPTS[name]
@@ -286,6 +297,8 @@ def dependencies_for_activation(roles: dict[str, dict[str, Any]], role: str) -> 
         return ["writer", "transcript_auditor"]
     if role in {"formula_code_checker", "pedagogy_editor"}:
         return ["writer"]
+    if role == "maintainer":
+        return ["final_reviewer"]
     return list(roles[role]["dependencies"])
 
 
@@ -773,6 +786,37 @@ def locked_refresh_inputs(args: argparse.Namespace, state_file: Path) -> int:
     return 0
 
 
+def command_rerun(args: argparse.Namespace) -> int:
+    """입력을 바꾸지 않고 선택 역할과 후속 역할만 다시 실행한다."""
+
+    state_file = args.state.expanduser().resolve()
+    with state_write_lock(state_file):
+        state = read_state(state_file)
+        running = [
+            role for role, entry in state["roles"].items() if entry["status"] == "running"
+        ]
+        if running:
+            raise RunError(f"실행 중 역할이 있어 재실행을 예약할 수 없습니다: {', '.join(running)}")
+
+        entry = get_role(state, args.role)
+        if not entry["active"]:
+            raise RunError(f"비활성 역할은 재실행할 수 없습니다: {args.role}")
+        if entry["status"] != "passed":
+            raise RunError(f"통과한 역할만 선택 재실행할 수 있습니다: {args.role}={entry['status']}")
+
+        invalidate_downstream(state["roles"], args.role)
+        entry["status"] = "blocked"
+        entry["started_at"] = None
+        entry["completed_at"] = None
+        entry["artifacts"] = []
+        entry["failure_reason"] = args.reason
+        refresh_statuses(state["roles"])
+        append_event(state, "rerun_requested", args.role, args.reason)
+        save_state(state_file, state)
+        print(f"재실행 예약: {args.role} | {entry['status']} | {args.reason}")
+        return 0
+
+
 def command_start(args: argparse.Namespace) -> int:
     state_file = args.state.expanduser().resolve()
     with state_write_lock(state_file):
@@ -959,6 +1003,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="입력 파일의 자동 분류를 교정합니다.",
     )
     refresh_parser.set_defaults(func=command_refresh_inputs)
+
+    rerun_parser = subparsers.add_parser(
+        "rerun", help="입력은 유지하고 선택한 통과 역할과 후속 역할만 다시 실행합니다."
+    )
+    rerun_parser.add_argument("state", type=Path)
+    rerun_parser.add_argument("--role", required=True, choices=ROLE_ORDER)
+    rerun_parser.add_argument("--reason", required=True)
+    rerun_parser.set_defaults(func=command_rerun)
 
     start_parser = subparsers.add_parser("start", help="준비된 역할의 실제 실행을 기록합니다.")
     start_parser.add_argument("state", type=Path)

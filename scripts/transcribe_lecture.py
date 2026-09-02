@@ -79,29 +79,70 @@ class OutputPaths:
     manifest_json: str
 
 
-def add_nvidia_dll_dirs() -> None:
-    """pip로 설치된 NVIDIA DLL 폴더를 Windows 검색 경로에 추가한다."""
-    bases: list[Path] = []
+_NVIDIA_DLL_DIR_HANDLES: list[Any] = []
+
+
+def discover_nvidia_dll_dirs() -> tuple[Path, ...]:
+    """현재 Python 환경에 설치된 NVIDIA DLL 디렉터리를 찾는다."""
+    if os.name != "nt":
+        return ()
+
+    site_roots: list[str] = []
     try:
-        import nvidia  # type: ignore
+        site_roots.extend(site.getsitepackages())
+    except (AttributeError, OSError):
+        pass
+    try:
+        user_site = site.getusersitepackages()
+    except (AttributeError, OSError):
+        user_site = ""
+    if user_site:
+        site_roots.append(user_site)
 
-        bases.append(Path(nvidia.__file__).resolve().parent)
-    except Exception:
-        for candidate in [*site.getsitepackages(), site.getusersitepackages()]:
-            path = Path(candidate) / "nvidia"
-            if path.is_dir():
-                bases.append(path)
-
-    for base in bases:
-        for subdir in ("cublas", "cudnn", "cuda_runtime"):
-            dll_dir = base / subdir / "bin"
-            if not dll_dir.is_dir():
+    discovered: list[Path] = []
+    seen: set[str] = set()
+    for site_root in site_roots:
+        nvidia_root = Path(site_root) / "nvidia"
+        if not nvidia_root.is_dir():
+            continue
+        for dll_dir in sorted(nvidia_root.glob("*/bin")):
+            if not dll_dir.is_dir() or not any(dll_dir.glob("*.dll")):
                 continue
-            try:
-                os.add_dll_directory(str(dll_dir))
-            except (AttributeError, OSError):
-                pass
-            os.environ["PATH"] = str(dll_dir) + os.pathsep + os.environ.get("PATH", "")
+            resolved = dll_dir.resolve()
+            key = os.path.normcase(str(resolved))
+            if key not in seen:
+                seen.add(key)
+                discovered.append(resolved)
+    return tuple(discovered)
+
+
+def add_nvidia_dll_dirs() -> tuple[Path, ...]:
+    """NVIDIA DLL 폴더를 현재 전사 프로세스에만 등록한다."""
+    dll_dirs = discover_nvidia_dll_dirs()
+    if not dll_dirs:
+        return ()
+
+    existing_path = os.environ.get("PATH", "")
+    existing_parts = [part for part in existing_path.split(os.pathsep) if part]
+    existing_keys = {os.path.normcase(part) for part in existing_parts}
+    prepend: list[str] = []
+
+    for dll_dir in dll_dirs:
+        dll_path = str(dll_dir)
+        try:
+            handle = os.add_dll_directory(dll_path)
+        except (AttributeError, OSError):
+            handle = None
+        if handle is not None:
+            # 핸들이 해제되면 Windows DLL 검색 경로 등록도 사라진다.
+            _NVIDIA_DLL_DIR_HANDLES.append(handle)
+        if os.path.normcase(dll_path) not in existing_keys:
+            existing_keys.add(os.path.normcase(dll_path))
+            prepend.append(dll_path)
+
+    if prepend:
+        os.environ["PATH"] = os.pathsep.join([*prepend, *existing_parts])
+    return dll_dirs
 
 
 # -----------------------------------------------------------------------------
@@ -489,6 +530,8 @@ def perform_transcription(
     initial_prompt: str | None,
     plan: TranscriptionPlan,
 ) -> tuple[list[dict[str, Any]], Any, str, str, tuple[str, str, str]]:
+    # CTranslate2를 불러오기 전에 현재 Python 환경의 CUDA DLL을 등록한다.
+    add_nvidia_dll_dirs()
     try:
         import faster_whisper  # type: ignore
     except ImportError as exc:
@@ -497,7 +540,6 @@ def perform_transcription(
             "requirements-transcription.txt를 사용해 설치하십시오."
         ) from exc
 
-    add_nvidia_dll_dirs()
     last_error: Exception | None = None
     for index, (model_size, device, compute_type) in enumerate(plan.attempts):
         try:

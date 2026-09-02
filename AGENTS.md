@@ -32,6 +32,17 @@
 
 ## 표준 실행
 
+사용자가 현재 PC에서 재생되는 **온라인 강의**를 직접 녹음해 달라고 요청한 경우에만, 실행 상태를 만들기 전에 Windows 시스템 오디오를 입력 폴더에 저장한다. 대면 수업이나 주변 마이크 녹음은 시작하지 않는다. 먼저 30초 시험 녹음으로 장치와 음량을 확인한다. 첫 수강이거나 사이트의 수강 인정 조건을 확인할 수 없으면 재생 속도는 1배로 유지한다.
+
+```powershell
+python scripts/record_lecture.py --lecture-id <강의ID> --duration 30
+python scripts/record_lecture.py --lecture-id <강의ID>
+```
+
+저장소를 직접 연 경우 기본값은 `input/<강의ID>/`에 저장한다. 스킬·플러그인으로 저장소 밖에서 호출됐다면 `--output`에 호출한 과목 폴더 안의 충돌 없는 새 WAV 경로를 명시해 자료가 엔진 저장소로 이동하지 않게 한다. 녹음은 사용자가 수강 권한과 녹음 허용 여부를 확인한 범위에서만 수행한다. 로그인·2단계 인증·CAPTCHA는 사용자가 직접 처리하며, 접근 제어나 DRM을 우회하지 않는다. 이미 `run_state.json`이 존재하는 강의에 새 녹음을 추가했다면 상태 파일을 직접 고치지 않고 `refresh-inputs`를 실행한다.
+
+강의 사이트 주소는 실행할 때마다 사용자가 브라우저에 직접 입력하거나 여는 값으로 취급한다. 특정 학교명, 사이트 URL, 계정 식별자, 비밀번호, 2단계 인증 값, 쿠키, 세션 토큰, 브라우저 프로필을 코드·설정·상태 파일·로그·예시·파일명에 기록하지 않으며 Git 또는 GitHub에 커밋하지 않는다. 인증 화면의 값은 사용자가 직접 입력하고 에이전트는 읽기·복사·출력하지 않는다.
+
 강의별 작업 상태를 먼저 만든다.
 
 ```powershell
@@ -47,6 +58,14 @@ python scripts/manage_run.py next workspace/<강의ID>/run_state.json
 python scripts/manage_run.py start workspace/<강의ID>/run_state.json --role <역할명>
 python scripts/manage_run.py complete workspace/<강의ID>/run_state.json --role <역할명> --artifact <산출물>
 ```
+
+입력이 같고 디자인·출력 순서만 바뀌면 전체 파이프라인을 다시 만들지 않고 영향받는 통과 역할부터 다시 연다.
+
+```powershell
+python scripts/manage_run.py rerun workspace/<강의ID>/run_state.json --role layout_builder --reason "사용자 출력 형식 변경"
+```
+
+단일 최종 PDF는 `maintainer`를 생략한다. 복수 파일 패키징·경로 이동·전달 목록 생성이 실제로 필요할 때만 활성화한다. 학생용 최종본에는 사용자가 요청하지 않은 PDF 쪽수·강의 타임스탬프를 넣지 않는다.
 
 작업 중 수식·코드 검증이나 설명 보강이 필요해진 경우에만 선택 역할을 활성화한다.
 

@@ -28,6 +28,7 @@ AI 에이전트를 써 본 적이 없어도 된다. 아래 순서대로 하면 �
 |---|---|
 | AI 코딩 도구 하나 | **Codex**, **Claude Code** 또는 **Cursor**. 이 프로젝트에 일을 시키는 창구다. 사용하는 도구에 따라 구독료나 모델 사용료가 들 수 있다. |
 | Python 3.10 이상 | 입력 해시·실행 상태·산출물 검증에 필요. 녹음 전사를 사용할 때는 전사 패키지도 추가로 설치한다. [python.org](https://www.python.org/downloads/)에서 설치 |
+| Windows 시스템 오디오 녹음(선택) | 온라인 강의를 이 PC에서 직접 녹음할 때만 `requirements-recording.txt`를 설치한다. 대면 수업·마이크 녹음 용도가 아니다. |
 | GPU | 없어도 된다. 전사가 느려질 뿐이다(1시간 강의 ≈ 20~40분) |
 
 ### 1. 프로젝트 받기
@@ -76,6 +77,7 @@ input/2026-03-10_과목A 자료로 학습노트 만들어줘
 
 - **돈이 드나?** 이 프로젝트 자체는 무료(MIT)다. 다만 AI 도구의 구독료·사용량은 본인 계정에서 나간다.
 - **녹음이 인터넷에 올라가나?** 기본 전사는 로컬 Whisper로 실행되므로 원본 녹음을 외부 전사 서비스에 자동 업로드하지 않는다. 다만 학습노트 생성 중 AI 도구가 읽은 텍스트·이미지 등의 처리 방식은 Codex, Claude Code 또는 Cursor의 계정 설정과 서비스 정책을 따른다.
+- **온라인 강의도 직접 녹음할 수 있나?** Windows에서는 가능하다. 사용자가 녹음을 명시적으로 요청하고 수강·녹음 권한을 확인한 온라인 강의에 한해, 기본 출력 장치의 재생음을 로컬 WAV로 저장한다. 대면 수업이나 주변 마이크는 녹음하지 않는다.
 - **전사만 따로 쓸 수 있나?** 된다. 녹음 파일을 `강의전사.bat`(여러 개면 `배치전사.bat`)에 끌어다 놓으면 전사본만 만들어 준다.
 
 ## 설치 방법 — 사용하는 도구에 맞게 선택
@@ -141,7 +143,7 @@ curl -fsSL https://claude.ai/install.sh | bash
 ## 사용자가 보는 흐름
 
 1. GitHub에서 프로젝트를 내려받고 AI 코딩 도구(Codex, Claude Code 또는 Cursor)에서 프로젝트 폴더를 연다.
-2. `input/`에 강의 교안과 녹음 또는 기존 전사본을 넣는다.
+2. `input/`에 강의 교안과 녹음 또는 기존 전사본을 넣는다. Windows에서 온라인 강의를 직접 녹음하도록 요청한 경우에는 시스템 오디오 녹음기가 이 폴더에 새 WAV를 만든다.
 3. “이 자료로 학습노트 만들어줘”라고 요청한다.
 4. 강의명과 날짜가 자료에서 명확하면 관리자가 질문 없이 진행한다. 여러 강의가 섞였거나 식별할 수 없을 때만 사용자에게 묻는다.
 5. 관리자가 필요한 역할만 실행하고 검수 실패 부분만 다시 처리한다.
@@ -152,7 +154,10 @@ curl -fsSL https://claude.ai/install.sh | bash
 ```mermaid
 flowchart TD
     U["사용자 요청과 input 자료"] --> M["관리자 에이전트"]
-    M --> P["Python: 파일 유형·SHA-256·실행 계획 기록"]
+    M --> Q{"온라인 강의 녹음을 요청했는가?"}
+    Q -->|"예"| G["Python: Windows 시스템 오디오 녹음"]
+    Q -->|"아니요"| P["Python: 파일 유형·SHA-256·실행 계획 기록"]
+    G --> P
     P --> D{"자료에 무엇이 있는가?"}
     D -->|"녹음만 있음"| T["전사 담당 에이전트와 로컬 Whisper"]
     D -->|"녹음 또는 전사 있음"| A["전사 검수·교안 정렬 담당"]
@@ -228,6 +233,7 @@ Python 통과는 내용이 좋다는 뜻이 아니다. 자동 검사는 기계�
 
 - 강의 교안: PDF, 슬라이드, 문서, 이미지
 - 강의 녹음: M4A, MP3, WAV 등
+- 온라인 강의 재생음: Windows WASAPI 루프백으로 새 WAV 생성(사용자가 명시적으로 요청한 경우만)
 - 기존 전사본: TXT, Markdown, SRT, VTT
 - 선택 자료: 교재, 과제, 코드, 기존 노트
 
@@ -236,7 +242,8 @@ Python 통과는 내용이 좋다는 뜻이 아니다. 자동 검사는 기계�
 ## 품질 처리 순서
 
 ```text
-교안 + 녹음
+[선택: 온라인 강의 재생 → 로컬 시스템 오디오 녹음]
+→ 교안 + 녹음
 → 강의 식별
 → 로컬 Whisper 전사
 → 전사 패키지 자동 검사
@@ -263,14 +270,17 @@ gongbu-haja/
 ├─ LICENSE                      MIT
 ├─ README.md
 ├─ note_final_rules.md
+├─ 강의녹음.bat                Windows 온라인 강의 시스템 오디오 녹음
 ├─ 강의전사.bat                녹음 1개 드래그앤드롭 전사
 ├─ 배치전사.bat                녹음 여러 개·폴더 드래그앤드롭 순차 전사
+├─ requirements-recording.txt
 ├─ requirements-transcription.txt
 ├─ agent_prompts/              역할별 프롬프트
 ├─ rules/                      공통 절차와 검수 기준
 ├─ scripts/
 │  ├─ transcribe_lecture.py    로컬 faster-whisper 전사(사양 기반 모델 자동 선택)
 │  ├─ transcribe_batch.py      여러 녹음을 한 번에 하나씩 처리하는 전사 큐
+│  ├─ record_lecture.py        Windows 온라인 강의 WASAPI 루프백 녹음
 │  ├─ manage_run.py            선택적 역할 계획·상태·입력 해시 관리
 │  ├─ project_types.py         녹음·녹화 형식 단일 정의
 │  ├─ validate_transcript_package.py
@@ -360,6 +370,35 @@ python scripts/transcribe_lecture.py "C:\자료\녹음001.m4a" `
 
 드래그앤드롭 실행에서는 `강의전사.bat`가 자동 판정을 먼저 시도하고, 필요한 경우에만 강의 식별자를 질문한다.
 
+## 온라인 강의 녹음 실행(Windows만)
+
+이 기능은 사용자가 녹음을 명시적으로 요청하고 수강 권한과 학교·교수자의 녹음 허용 범위를 확인한 **온라인 강의 재생음**에만 사용한다. 대면 수업이나 마이크 입력은 지원하지 않으며 로그인·2단계 인증·CAPTCHA와 강의 재생 시작은 필요할 때 사용자가 직접 처리한다. 접근 제어나 DRM은 우회하지 않는다.
+
+강의 사이트 주소와 로그인 정보는 설정 파일이나 명령줄 인자로 받지 않는다. 사용자가 실행할 때 브라우저에서 직접 사이트를 열고 인증하며, 특정 학교명·사이트 URL·계정 식별자·비밀번호·쿠키·세션·브라우저 프로필은 프로젝트 파일이나 로그에 기록하지 않고 Git/GitHub에도 올리지 않는다.
+
+처음 한 번 녹음 패키지를 설치한다.
+
+```powershell
+python -m pip install -r requirements-recording.txt
+```
+
+사용 가능한 Windows 출력 루프백 장치를 확인하고 30초 시험 녹음을 만든다.
+
+```powershell
+python scripts/record_lecture.py --list-devices
+python scripts/record_lecture.py --lecture-id "2026-03-10_과목A_본강의" --duration 30
+```
+
+시험 파일을 재생해 음량을 확인한 뒤 본 녹음을 시작한다. `--duration`을 생략하면 `Ctrl+C`를 누를 때까지 녹음한다.
+
+```powershell
+python scripts/record_lecture.py --lecture-id "2026-03-10_과목A_본강의"
+```
+
+터미널 명령 대신 탐색기에서 `강의녹음.bat`를 실행해 강의 식별자와 선택 항목을 입력해도 된다.
+
+출력은 `input/<lecture_id>/` 아래의 충돌 없는 새 WAV 파일이다. 녹음 중에는 `.part.wav`로 쓰고 정상 종료나 `Ctrl+C` 후 완성 이름으로 바꾸므로 기존 녹음을 덮어쓰지 않는다. 이미 해당 강의의 실행 상태를 만든 뒤 녹음했다면 `manage_run.py refresh-inputs`로 새 입력을 반영한다.
+
 ## 전사 실행
 
 실제 전사 전에 이름과 출력 위치만 확인:
@@ -422,7 +461,7 @@ SRT는 타임스탬프 기준 원시 전사, TXT는 검색용 원문, Markdown�
 
 ```powershell
 python scripts/validate_agent_setup.py --strict
-python -m unittest scripts.test_manage_run scripts.test_validate_note_output scripts.test_transcribe_lecture scripts.test_transcribe_batch
+python -m unittest scripts.test_manage_run scripts.test_validate_note_output scripts.test_record_lecture scripts.test_transcribe_lecture scripts.test_transcribe_batch
 ```
 
 전사 패키지:
@@ -454,7 +493,7 @@ python -m pip install -r requirements-transcription.txt
 
 ## 주의: 강의 자료의 권리
 
-강의 녹음과 교안에는 교수자의 저작권과 음성이 담겨 있다. 원본 녹음의 전사는 로컬 처리를 기본으로 하지만, AI 도구가 읽은 자료 내용의 처리는 해당 서비스의 계정 설정과 정책을 따른다. 원본 녹음·교안·전사본을 저장소에 커밋하거나 공개적으로 재배포하지 않도록 `input/`과 `workspace/`가 기본으로 `.gitignore`에 포함되어 있다. 생성된 학습노트의 공유 가능 여부는 소속 학교의 규정과 교수자의 방침을 따른다.
+강의 녹음과 교안에는 교수자의 저작권과 음성이 담겨 있다. 원본 녹음의 전사는 로컬 처리를 기본으로 하지만, AI 도구가 읽은 자료 내용의 처리는 해당 서비스의 계정 설정과 정책을 따른다. 원본 녹음·교안·전사본과 인증 관련 산출물을 저장소에 커밋하거나 공개적으로 재배포하지 않도록 입력·작업 폴더, 미디어 확장자, 환경 파일, 브라우저 프로필·쿠키·세션 파일이 기본으로 `.gitignore`에 포함되어 있다. 생성된 학습노트의 공유 가능 여부는 소속 학교의 규정과 교수자의 방침을 따른다.
 
 ## 라이선스
 

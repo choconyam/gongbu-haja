@@ -9,6 +9,27 @@ venv/
 input/
 workspace/*
 !workspace/README.md
+tmp/
+output/
+
+# 녹음·영상은 저장 위치와 관계없이 Git에서 제외한다.
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.ogg
+*.webm
+*.mp4
+
+# 학교·계정별 로컬 설정과 브라우저 인증 산출물을 저장하지 않는다.
+.env
+.env.*
+!.env.example
+browser-profile/
+.auth/
+cookies*.json
+storage-state*.json
 
 # 로컬 전사 모델과 LaTeX 중간 산출물
 models/
@@ -19,4 +40,3 @@ models/
 *.out
 *.synctex.gz
 *.toc
-

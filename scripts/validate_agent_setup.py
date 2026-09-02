@@ -53,6 +53,21 @@ FORBIDDEN_TOKENS = (
     "allow_implicit_invocation",
 )
 PACKAGE_NAME = "gongbu-haja"
+REQUIRED_PRIVATE_GITIGNORE_PATTERNS = (
+    "input/",
+    "workspace/*",
+    "*.wav",
+    "*.mp3",
+    "*.m4a",
+    "*.webm",
+    "*.mp4",
+    ".env",
+    ".env.*",
+    "browser-profile/",
+    ".auth/",
+    "cookies*.json",
+    "storage-state*.json",
+)
 
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 BACKTICK_PATH_RE = re.compile(r"`([^`\n]+\.(?:md|py))`")
@@ -279,9 +294,11 @@ def validate(root: Path) -> Report:
         "manage_run.py",
         "test_manage_run.py",
         "test_validate_note_output.py",
+        "test_record_lecture.py",
         "test_transcribe_lecture.py",
         "test_transcribe_batch.py",
         "project_types.py",
+        "record_lecture.py",
         "transcribe_lecture.py",
         "transcribe_batch.py",
         "validate_transcript_package.py",
@@ -298,13 +315,33 @@ def validate(root: Path) -> Report:
         "README.md",
         ".gitignore",
         ".gitattributes",
+        "requirements-recording.txt",
         "requirements-transcription.txt",
+        "강의녹음.bat",
         "강의전사.bat",
         "배치전사.bat",
     ):
         path = root / name
         if not path.exists():
             report.add("error", "missing-project-file", "통합 프로젝트 필수 파일이 없습니다.", path)
+
+    gitignore_path = root / ".gitignore"
+    if gitignore_path.is_file():
+        gitignore_text = read_utf8(gitignore_path, report)
+        if gitignore_text is not None:
+            ignored_patterns = {
+                line.strip()
+                for line in gitignore_text.splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            }
+            for pattern in REQUIRED_PRIVATE_GITIGNORE_PATTERNS:
+                if pattern not in ignored_patterns:
+                    report.add(
+                        "error",
+                        "missing-private-gitignore",
+                        f"강의·인증 정보 보호용 Git 제외 규칙이 없습니다: {pattern}",
+                        gitignore_path,
+                    )
 
     return report
 
