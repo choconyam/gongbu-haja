@@ -28,6 +28,65 @@ class ManageRunTests(unittest.TestCase):
         self.assertEqual(expected, result.returncode, msg=result.stdout + result.stderr)
         return result
 
+    def write_source_map(self, state_file: Path) -> Path:
+        path = state_file.parent / "source_map.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "kind": "study_note_source_map",
+                    "schema_version": 1,
+                    "source_units": [{"source_unit_id": "handout-page-1"}],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def write_coverage(self, state_file: Path, mode: str) -> Path:
+        path = state_file.parent / f"coverage-{mode}.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "kind": "study_note_source_coverage",
+                    "schema_version": 1,
+                    "note_mode": mode,
+                    "reviewer_profile": "economy_max" if mode == "faithful" else "quality_xhigh",
+                    "items": [
+                        {
+                            "source_unit_id": "handout-page-1",
+                            "decision": "included",
+                            "note_refs": ["section-1"],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def complete_final_review(
+        self,
+        state_file: Path,
+        artifact: Path,
+        source_map: Path,
+        mode: str,
+    ) -> None:
+        coverage = self.write_coverage(state_file, mode)
+        self.run_cli(
+            "complete",
+            str(state_file),
+            "--role",
+            "final_reviewer",
+            "--artifact",
+            str(artifact),
+            "--source-map",
+            str(source_map),
+            "--coverage-report",
+            str(coverage),
+        )
+
     def test_routes_audio_without_transcript_and_enforces_order(self) -> None:
         # 녹음만 있으면 전사부터 시작하고 작성 담당의 선행 실행은 차단해야 한다.
         with tempfile.TemporaryDirectory() as temporary:
@@ -122,6 +181,459 @@ class ManageRunTests(unittest.TestCase):
             self.assertEqual("blocked", state["roles"]["pedagogy_editor"]["status"])
             self.run_cli("start", str(state_file), "--role", "pedagogy_editor", expected=2)
 
+    def test_note_mode_is_recorded_and_changes_default_enrichment_route(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+
+            faithful_result = self.run_cli(
+                "init",
+                str(inputs),
+                "--lecture-id",
+                "faithful-mode",
+                "--root",
+                str(root),
+                "--note-mode",
+                "faithful",
+            )
+            faithful = json.loads(Path(faithful_result.stdout.strip()).read_text(encoding="utf-8"))
+            self.assertEqual("faithful", faithful["note_mode"])
+            self.assertEqual("자료 충실형", faithful["mode_contract"]["label"])
+            self.assertEqual("skipped", faithful["roles"]["pedagogy_editor"]["status"])
+
+            deep_result = self.run_cli(
+                "init",
+                str(inputs),
+                "--lecture-id",
+                "deep-mode",
+                "--root",
+                str(root),
+                "--note-mode",
+                "deep",
+            )
+            deep_state_file = Path(deep_result.stdout.strip())
+            deep = json.loads(deep_state_file.read_text(encoding="utf-8"))
+            self.assertEqual("deep", deep["note_mode"])
+            self.assertEqual("심화 이해형", deep["mode_contract"]["label"])
+            self.assertTrue(deep["roles"]["pedagogy_editor"]["active"])
+            self.assertEqual("blocked", deep["roles"]["pedagogy_editor"]["status"])
+            next_payload = json.loads(self.run_cli("next", str(deep_state_file)).stdout)
+            self.assertEqual("deep", next_payload["note_mode"])
+
+    def test_schema_v1_state_is_migrated_without_restarting_the_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli(
+                "init", str(inputs), "--lecture-id", "legacy-state", "--root", str(root)
+            )
+            state_file = Path(result.stdout.strip())
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            state["schema_version"] = 1
+            state.pop("review_cycle")
+            state["cost_usage"] = {
+                "critical_review_limit": 1,
+                "critical_reviews": [],
+            }
+            for role, entry in state["roles"].items():
+                entry.pop("active_profile", None)
+                entry.pop("premium_call_id", None)
+                if role == "final_reviewer":
+                    entry["max_attempts"] = 2
+            state_file.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+            self.run_cli("status", str(state_file))
+            self.run_cli("refresh-inputs", str(state_file))
+            migrated = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(2, migrated["schema_version"])
+            self.assertEqual(1, migrated["review_cycle"])
+            self.assertEqual(1, migrated["roles"]["final_reviewer"]["max_attempts"])
+            self.assertEqual([], migrated["cost_usage"]["premium_final_reviews"])
+
+    def test_execution_policy_is_mode_aware_and_prefers_python_first(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "lecture.wav").write_bytes(b"test-audio")
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+
+            result = self.run_cli(
+                "init",
+                str(inputs),
+                "--lecture-id",
+                "cost-routing",
+                "--root",
+                str(root),
+            )
+            state_file = Path(result.stdout.strip())
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+
+            self.assertTrue(state["cost_policy"]["deterministic_first"])
+            self.assertEqual("economy_high", state["cost_policy"]["default_subagent_profile"])
+            self.assertEqual(0, state["cost_policy"]["full_role_retries"])
+            self.assertFalse(state["cost_policy"]["automatic_flagship_escalation"])
+            self.assertEqual("gpt-5.6-luna", state["execution_profiles"]["economy_high"]["codex_model"])
+            self.assertEqual("high", state["execution_profiles"]["economy_high"]["reasoning_effort"])
+            self.assertEqual("gpt-5.6-luna", state["execution_profiles"]["economy_max"]["codex_model"])
+            self.assertEqual("max", state["execution_profiles"]["economy_max"]["reasoning_effort"])
+            self.assertEqual("gpt-5.6-sol", state["execution_profiles"]["quality_high"]["codex_model"])
+            self.assertEqual("high", state["execution_profiles"]["quality_high"]["reasoning_effort"])
+            self.assertEqual("gpt-5.6-sol", state["execution_profiles"]["quality_xhigh"]["codex_model"])
+            self.assertEqual("xhigh", state["execution_profiles"]["quality_xhigh"]["reasoning_effort"])
+            self.assertTrue(state["cost_policy"]["terra_enabled"] is False)
+
+            self.assertEqual("python", state["roles"]["transcriber"]["execution"]["executor"])
+            self.assertEqual("hybrid", state["roles"]["transcript_auditor"]["execution"]["executor"])
+            self.assertEqual("subagent", state["roles"]["writer"]["execution"]["executor"])
+            self.assertEqual("economy_high", state["roles"]["writer"]["execution"]["agent_profile"])
+            self.assertEqual("economy_max", state["roles"]["final_reviewer"]["execution"]["agent_profile"])
+            self.assertEqual("python", state["roles"]["maintainer"]["execution"]["executor"])
+
+            deep_result = self.run_cli(
+                "init",
+                str(inputs),
+                "--lecture-id",
+                "cost-routing-deep",
+                "--root",
+                str(root),
+                "--note-mode",
+                "deep",
+            )
+            deep = json.loads(Path(deep_result.stdout.strip()).read_text(encoding="utf-8"))
+            self.assertEqual("economy_high", deep["roles"]["source_mapper"]["execution"]["agent_profile"])
+            self.assertEqual("quality_high", deep["roles"]["writer"]["execution"]["agent_profile"])
+            self.assertEqual("quality_high", deep["roles"]["pedagogy_editor"]["execution"]["agent_profile"])
+            self.assertEqual("quality_xhigh", deep["roles"]["final_reviewer"]["execution"]["agent_profile"])
+            self.assertIsNone(deep["roles"]["final_reviewer"]["execution"]["escalation_profile"])
+
+            next_payload = json.loads(self.run_cli("next", str(state_file)).stdout)
+            self.assertEqual("economy_high", next_payload["cost_policy"]["default_subagent_profile"])
+            self.assertEqual("python", next_payload["ready"][0]["execution"]["executor"])
+
+            state["roles"]["writer"]["execution"]["agent_profile"] = "unbounded-expensive-model"
+            state_file.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+            drift = self.run_cli("status", str(state_file), expected=2)
+            self.assertIn("실행 정책이 프로젝트 기준과 일치하지 않습니다", drift.stderr)
+
+    def test_failed_role_allows_only_one_scoped_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli(
+                "init",
+                str(inputs),
+                "--lecture-id",
+                "retry-budget",
+                "--root",
+                str(root),
+            )
+            state_file = Path(result.stdout.strip())
+
+            self.run_cli("start", str(state_file), "--role", "source_mapper")
+            self.run_cli(
+                "fail",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--reason",
+                "교안 2쪽 대응 불명확",
+            )
+            self.run_cli("start", str(state_file), "--role", "source_mapper", expected=2)
+            repair_packet = state_file.parent / "repair_packet.json"
+            repair_packet.write_text(
+                json.dumps(
+                    {
+                        "model_input": True,
+                        "kind": "repair_packet",
+                        "target": "교안 2쪽과 전사 구간 4",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            self.run_cli(
+                "start",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--repair-scope",
+                "전체 강의 재검수",
+                "--repair-packet",
+                str(repair_packet),
+                expected=2,
+            )
+            self.run_cli(
+                "start",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--repair-scope",
+                "교안 2쪽과 전사 구간 4만 재검수",
+                "--repair-packet",
+                str(repair_packet),
+            )
+            self.run_cli(
+                "fail",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--reason",
+                "근거 부족",
+            )
+            third = self.run_cli(
+                "start",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--repair-scope",
+                "교안 2쪽",
+                "--repair-packet",
+                str(repair_packet),
+                expected=2,
+            )
+            self.assertIn("재검수 한도를 초과", third.stderr)
+
+    def test_targeted_sol_review_requires_one_small_explicit_model_packet(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli(
+                "init",
+                str(inputs),
+                "--lecture-id",
+                "critical-budget",
+                "--root",
+                str(root),
+            )
+            state_file = Path(result.stdout.strip())
+            packet = state_file.parent / "packet.json"
+            packet.write_text(
+                json.dumps(
+                    {
+                        "model_input": True,
+                        "kind": "review_packet",
+                        "target": {"claim": "숫자 10인지 100인지 불명확"},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            self.run_cli(
+                "escalate",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--packet",
+                str(packet),
+                "--category",
+                "number",
+                "--reason",
+                "핵심 수치 충돌",
+                expected=2,
+            )
+            self.run_cli("start", str(state_file), "--role", "source_mapper")
+
+            aggregate = state_file.parent / "aggregate.json"
+            aggregate.write_text('{"model_input": false}', encoding="utf-8")
+            self.run_cli(
+                "escalate",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--packet",
+                str(aggregate),
+                "--category",
+                "number",
+                "--reason",
+                "핵심 수치 충돌",
+                expected=2,
+            )
+            oversized = state_file.parent / "oversized.json"
+            oversized.write_text(
+                json.dumps({"model_input": True, "text": "x" * (17 * 1024)}),
+                encoding="utf-8",
+            )
+            self.run_cli(
+                "escalate",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--packet",
+                str(oversized),
+                "--category",
+                "number",
+                "--reason",
+                "핵심 수치 충돌",
+                expected=2,
+            )
+
+            dispatch = self.run_cli(
+                "escalate",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--packet",
+                str(packet),
+                "--category",
+                "number",
+                "--reason",
+                "핵심 수치 충돌",
+            )
+            payload = json.loads(dispatch.stdout)
+            self.assertEqual("critical-review-1", payload["call_id"])
+            self.assertEqual("gpt-5.6-sol", payload["execution"]["codex_model"])
+            self.assertEqual("high", payload["execution"]["reasoning_effort"])
+            self.assertEqual(0, payload["remaining_critical_reviews"])
+            self.run_cli(
+                "escalate",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--packet",
+                str(packet),
+                "--category",
+                "number",
+                "--reason",
+                "다시 검수",
+                expected=2,
+            )
+            self.run_cli(
+                "fail",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--reason",
+                "핵심 수치 충돌이 남음",
+            )
+            self.run_cli(
+                "start",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--repair-scope",
+                "교안 2쪽 수치만 재검수",
+                "--repair-packet",
+                str(packet),
+                expected=2,
+            )
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(1, len(state["cost_usage"]["critical_reviews"]))
+            self.assertEqual("failed", state["cost_usage"]["critical_reviews"][0]["status"])
+
+    def test_failed_role_escalation_becomes_a_tracked_running_call(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli(
+                "init", str(inputs), "--lecture-id", "failed-escalation", "--root", str(root)
+            )
+            state_file = Path(result.stdout.strip())
+            packet = state_file.parent / "review_packet.json"
+            packet.write_text(
+                json.dumps(
+                    {
+                        "model_input": True,
+                        "kind": "review_packet",
+                        "target": {"source_unit_id": "handout-page-1"},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            self.run_cli("start", str(state_file), "--role", "source_mapper")
+            self.run_cli(
+                "fail", str(state_file), "--role", "source_mapper", "--reason", "수치 충돌"
+            )
+            self.run_cli(
+                "escalate",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--packet",
+                str(packet),
+                "--category",
+                "number",
+                "--reason",
+                "교안 핵심 수치 확인",
+            )
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual("running", state["roles"]["source_mapper"]["status"])
+            self.assertEqual("quality_high", state["roles"]["source_mapper"]["active_profile"])
+            self.assertEqual(
+                "critical-review-1", state["roles"]["source_mapper"]["critical_review_call_id"]
+            )
+            self.assertEqual("running", state["cost_usage"]["critical_reviews"][0]["status"])
+
+            source_map = self.write_source_map(state_file)
+            self.run_cli(
+                "complete",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--artifact",
+                str(source_map),
+            )
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual("passed", state["cost_usage"]["critical_reviews"][0]["status"])
+
+    def test_set_mode_reuses_mapping_and_invalidates_only_writer_downstream(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli(
+                "init",
+                str(inputs),
+                "--lecture-id",
+                "mode-change",
+                "--root",
+                str(root),
+                "--note-mode",
+                "faithful",
+            )
+            state_file = Path(result.stdout.strip())
+
+            source_map = self.write_source_map(state_file)
+            for role in ("source_mapper", "writer", "layout_builder", "final_reviewer"):
+                artifact = source_map if role == "source_mapper" else state_file.parent / f"{role}.txt"
+                if role != "source_mapper":
+                    artifact.write_text(role, encoding="utf-8")
+                self.run_cli("start", str(state_file), "--role", role)
+                if role == "final_reviewer":
+                    self.complete_final_review(state_file, artifact, source_map, "faithful")
+                else:
+                    self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
+
+            self.run_cli(
+                "set-mode",
+                str(state_file),
+                "--note-mode",
+                "deep",
+                "--reason",
+                "수식 유도와 배경지식 보강 필요",
+            )
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual("deep", state["note_mode"])
+            self.assertEqual("passed", state["roles"]["source_mapper"]["status"])
+            self.assertEqual("ready", state["roles"]["writer"]["status"])
+            self.assertEqual("blocked", state["roles"]["pedagogy_editor"]["status"])
+            self.assertEqual("blocked", state["roles"]["layout_builder"]["status"])
+            self.assertEqual("blocked", state["roles"]["final_reviewer"]["status"])
+            self.assertEqual([], state["roles"]["writer"]["artifacts"])
+
     def test_deactivate_transcriber_unblocks_auditor_for_provided_transcript(self) -> None:
         # 관리자가 기존 전사를 확인한 경우 불필요한 자동 전사를 명시적으로 끌 수 있어야 한다.
         with tempfile.TemporaryDirectory() as temporary:
@@ -155,14 +667,28 @@ class ManageRunTests(unittest.TestCase):
             result = self.run_cli("init", str(inputs), "--lecture-id", "minimal", "--root", str(root))
             state_file = Path(result.stdout.strip())
 
+            source_map = self.write_source_map(state_file)
             for role in ("source_mapper", "writer", "layout_builder", "final_reviewer"):
-                artifact = state_file.parent / f"{role}.txt"
-                artifact.write_text(role, encoding="utf-8")
+                artifact = source_map if role == "source_mapper" else state_file.parent / f"{role}.txt"
+                if role != "source_mapper":
+                    artifact.write_text(role, encoding="utf-8")
                 self.run_cli("start", str(state_file), "--role", role)
-                self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
+                if role == "final_reviewer":
+                    self.complete_final_review(state_file, artifact, source_map, "faithful")
+                else:
+                    self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
 
             state = json.loads(state_file.read_text(encoding="utf-8"))
             self.assertEqual("skipped", state["roles"]["maintainer"]["status"])
+            self.assertEqual(2, state["schema_version"])
+            self.assertEqual(1, state["roles"]["final_reviewer"]["max_attempts"])
+            premium = state["cost_usage"]["premium_final_reviews"]
+            self.assertEqual(1, len(premium))
+            self.assertEqual("faithful_final_luna_max", premium[0]["route"])
+            self.assertEqual("economy_max", premium[0]["profile"])
+            self.assertEqual("gpt-5.6-luna", premium[0]["model"])
+            self.assertEqual("max", premium[0]["reasoning_effort"])
+            self.assertEqual("passed", premium[0]["status"])
 
             self.run_cli("verify", str(state_file), "--check-inputs")
             source.write_bytes(b"changed-pdf")
@@ -174,6 +700,251 @@ class ManageRunTests(unittest.TestCase):
             result = self.run_cli("verify", str(state_file), expected=1)
             self.assertIn("변경되었거나 누락된 산출물", result.stdout)
 
+    def test_final_review_requires_complete_mode_matched_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli(
+                "init", str(inputs), "--lecture-id", "coverage-gate", "--root", str(root)
+            )
+            state_file = Path(result.stdout.strip())
+            source_map = self.write_source_map(state_file)
+            for role in ("source_mapper", "writer", "layout_builder"):
+                artifact = source_map if role == "source_mapper" else state_file.parent / f"{role}.txt"
+                if role != "source_mapper":
+                    artifact.write_text(role, encoding="utf-8")
+                self.run_cli("start", str(state_file), "--role", role)
+                self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
+
+            review = state_file.parent / "review.txt"
+            review.write_text("pass", encoding="utf-8")
+            self.run_cli("start", str(state_file), "--role", "final_reviewer")
+            self.run_cli(
+                "complete",
+                str(state_file),
+                "--role",
+                "final_reviewer",
+                "--artifact",
+                str(review),
+                expected=2,
+            )
+
+            bad_coverage = self.write_coverage(state_file, "faithful")
+            payload = json.loads(bad_coverage.read_text(encoding="utf-8"))
+            payload["items"] = []
+            bad_coverage.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            self.run_cli(
+                "complete",
+                str(state_file),
+                "--role",
+                "final_reviewer",
+                "--artifact",
+                str(review),
+                "--source-map",
+                str(source_map),
+                "--coverage-report",
+                str(bad_coverage),
+                expected=2,
+            )
+
+            coverage = self.write_coverage(state_file, "faithful")
+            self.run_cli(
+                "complete",
+                str(state_file),
+                "--role",
+                "final_reviewer",
+                "--artifact",
+                str(review),
+                "--source-map",
+                str(source_map),
+                "--coverage-report",
+                str(coverage),
+            )
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual("economy_max", state["roles"]["final_reviewer"]["coverage_gate"]["reviewer_profile"])
+            coverage.write_text("{}", encoding="utf-8")
+            verify = self.run_cli("verify", str(state_file), expected=1)
+            self.assertIn("coverage report가 변경되었거나 누락됨", verify.stdout)
+
+    def test_deep_final_review_is_one_sol_xhigh_call_per_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli(
+                "init",
+                str(inputs),
+                "--lecture-id",
+                "deep-premium-budget",
+                "--root",
+                str(root),
+                "--note-mode",
+                "deep",
+            )
+            state_file = Path(result.stdout.strip())
+            source_map = self.write_source_map(state_file)
+            for role in ("source_mapper", "writer", "pedagogy_editor", "layout_builder"):
+                artifact = source_map if role == "source_mapper" else state_file.parent / f"{role}.txt"
+                if role != "source_mapper":
+                    artifact.write_text(role, encoding="utf-8")
+                self.run_cli("start", str(state_file), "--role", role)
+                self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
+
+            self.run_cli("start", str(state_file), "--role", "final_reviewer")
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            calls = state["cost_usage"]["premium_final_reviews"]
+            self.assertEqual(1, len(calls))
+            self.assertEqual("deep_final_sol_xhigh", calls[0]["route"])
+            self.assertEqual("gpt-5.6-sol", calls[0]["model"])
+            self.assertEqual("xhigh", calls[0]["reasoning_effort"])
+            self.assertEqual("running", calls[0]["status"])
+
+            self.run_cli(
+                "fail",
+                str(state_file),
+                "--role",
+                "final_reviewer",
+                "--reason",
+                "국소 수정안을 같은 호출에서 반영할 수 없음",
+            )
+            retry = self.run_cli(
+                "start",
+                str(state_file),
+                "--role",
+                "final_reviewer",
+                expected=2,
+            )
+            self.assertIn("재검수 한도를 초과", retry.stderr)
+            bypass = self.run_cli(
+                "rerun",
+                str(state_file),
+                "--role",
+                "layout_builder",
+                "--change-kind",
+                "output_contract",
+                "--reason",
+                "최종 검수 실패 우회 시도",
+                expected=2,
+            )
+            self.assertIn("실패 복구에는 rerun을 사용할 수 없습니다", bypass.stderr)
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(1, len(state["cost_usage"]["premium_final_reviews"]))
+            self.assertEqual("failed", state["cost_usage"]["premium_final_reviews"][0]["status"])
+
+    def test_same_final_artifacts_cannot_be_reaudited_by_incrementing_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli(
+                "init", str(inputs), "--lecture-id", "fingerprint-budget", "--root", str(root)
+            )
+            state_file = Path(result.stdout.strip())
+            source_map = self.write_source_map(state_file)
+            artifacts: dict[str, Path] = {}
+            for role in ("source_mapper", "writer", "layout_builder", "final_reviewer"):
+                artifact = source_map if role == "source_mapper" else state_file.parent / f"{role}.txt"
+                if role != "source_mapper":
+                    artifact.write_text(role, encoding="utf-8")
+                artifacts[role] = artifact
+                self.run_cli("start", str(state_file), "--role", role)
+                if role == "final_reviewer":
+                    self.complete_final_review(state_file, artifact, source_map, "faithful")
+                else:
+                    self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
+
+            direct = self.run_cli(
+                "rerun",
+                str(state_file),
+                "--role",
+                "final_reviewer",
+                "--change-kind",
+                "user_request",
+                "--reason",
+                "같은 완성본 다시 검수",
+                expected=2,
+            )
+            self.assertIn("직접 재실행할 수 없습니다", direct.stderr)
+
+            self.run_cli(
+                "rerun",
+                str(state_file),
+                "--role",
+                "layout_builder",
+                "--change-kind",
+                "output_contract",
+                "--reason",
+                "출력 계약 확인",
+            )
+            self.run_cli("start", str(state_file), "--role", "layout_builder")
+            self.run_cli(
+                "complete",
+                str(state_file),
+                "--role",
+                "layout_builder",
+                "--artifact",
+                str(artifacts["layout_builder"]),
+            )
+            duplicate = self.run_cli(
+                "start", str(state_file), "--role", "final_reviewer", expected=2
+            )
+            self.assertIn("동일한 source map과 완성본", duplicate.stderr)
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(1, len(state["cost_usage"]["premium_final_reviews"]))
+
+    def test_layout_and_invalid_categories_cannot_use_sol_escalation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli(
+                "init", str(inputs), "--lecture-id", "escalation-scope", "--root", str(root)
+            )
+            state_file = Path(result.stdout.strip())
+            packet = state_file.parent / "review_packet.json"
+            packet.write_text(
+                json.dumps(
+                    {"model_input": True, "kind": "review_packet", "target": "한 페이지"},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            layout = self.run_cli(
+                "escalate",
+                str(state_file),
+                "--role",
+                "layout_builder",
+                "--packet",
+                str(packet),
+                "--category",
+                "final_blocker",
+                "--reason",
+                "레이아웃 문제",
+                expected=2,
+            )
+            self.assertIn("승격을 지원하지 않는 역할", layout.stderr)
+
+            self.run_cli("start", str(state_file), "--role", "source_mapper")
+            invalid = self.run_cli(
+                "escalate",
+                str(state_file),
+                "--role",
+                "source_mapper",
+                "--packet",
+                str(packet),
+                "--category",
+                "logic_gap",
+                "--reason",
+                "분류 불일치",
+                expected=2,
+            )
+            self.assertIn("허용되지 않은 승격 분류", invalid.stderr)
+
     def test_rerun_only_invalidates_selected_role_and_descendants(self) -> None:
         # 조판 취향만 바뀌면 매핑·집필을 반복하지 않고 조판 이후만 다시 실행한다.
         with tempfile.TemporaryDirectory() as temporary:
@@ -184,11 +955,16 @@ class ManageRunTests(unittest.TestCase):
             result = self.run_cli("init", str(inputs), "--lecture-id", "rerun", "--root", str(root))
             state_file = Path(result.stdout.strip())
 
+            source_map = self.write_source_map(state_file)
             for role in ("source_mapper", "writer", "layout_builder", "final_reviewer"):
-                artifact = state_file.parent / f"{role}.txt"
-                artifact.write_text(role, encoding="utf-8")
+                artifact = source_map if role == "source_mapper" else state_file.parent / f"{role}.txt"
+                if role != "source_mapper":
+                    artifact.write_text(role, encoding="utf-8")
                 self.run_cli("start", str(state_file), "--role", role)
-                self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
+                if role == "final_reviewer":
+                    self.complete_final_review(state_file, artifact, source_map, "faithful")
+                else:
+                    self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
 
             self.run_cli(
                 "rerun",
@@ -197,6 +973,8 @@ class ManageRunTests(unittest.TestCase):
                 "layout_builder",
                 "--reason",
                 "교안 순서형 조판으로 변경",
+                "--change-kind",
+                "output_contract",
             )
             state = json.loads(state_file.read_text(encoding="utf-8"))
             self.assertEqual("passed", state["roles"]["source_mapper"]["status"])

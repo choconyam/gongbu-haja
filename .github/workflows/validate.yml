@@ -22,4 +22,4 @@ jobs:
       - name: 프로젝트 구조 검증
         run: python scripts/validate_agent_setup.py --strict
       - name: 단위 테스트
-        run: python -m unittest scripts.test_manage_run scripts.test_validate_note_output scripts.test_transcribe_lecture scripts.test_transcribe_batch -v
+        run: python -m unittest discover -s scripts -p "test_*.py" -v

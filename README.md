@@ -18,6 +18,17 @@
 프로젝트를 AI 코딩 도구(Codex, Claude Code 또는 Cursor)로 열기 → input 폴더에 교안·녹음·전사본 넣기 → “학습노트 만들어줘”라고 요청하기
 ```
 
+## 두 가지 학습노트 제작 모드
+
+새 노트를 만들 때 목적에 맞는 모드를 선택할 수 있다.
+
+| 모드 | 요청 예시 | 결과 |
+|---|---|---|
+| **자료 충실형** (`faithful`) | “자료 충실형으로 빠르게 정리해줘” | 교안과 검수된 교수 설명만 압축해 암기하기 좋게 정리한다. 외부 배경지식·새 유도는 기본적으로 넣지 않아 빠르고 모델 사용량이 적다. |
+| **심화 이해형** (`deep`) | “심화 이해형으로 배경과 연결 과정까지 설명해줘” | 과목 분야와 관계없이 필요한 배경 맥락, 인과관계, 중간 사고, 유도 과정, 예시와 적용 조건을 검증해 보강한다. |
+
+새 학습노트 요청에서 모드를 말하지 않으면 에이전트는 작업을 시작하기 전에 항상 두 모드를 제시하고 선택을 받는다. 자료 특성에 맞는 모드를 추천할 수는 있지만 과목 계열만으로 결정하지 않는다. 명령행 자동화의 안전한 기본값은 `faithful`이다. 어느 모드든 전사와 PDF 추출은 로컬에서 한 번만 수행하며, 전체 원시 전사를 역할마다 반복 전달하지 않는다.
+
 ## 처음이라면 — 하나씩 따라 하기
 
 AI 에이전트를 써 본 적이 없어도 된다. 아래 순서대로 하면 된다.
@@ -64,7 +75,7 @@ gongbu-haja/
 ### 4. 한 문장 말하기
 
 ```text
-input/2026-03-10_과목A 자료로 학습노트 만들어줘
+input/2026-03-10_과목A 자료로 자료 충실형 학습노트 만들어줘
 ```
 
 이게 전부다. 전사, 검수, 작성, 조판을 에이전트가 알아서 진행하고, 스스로 확정할 수 없는 것(강의 이름이 애매하다든지)만 물어본다.
@@ -229,6 +240,18 @@ Python 통과는 내용이 좋다는 뜻이 아니다. 자동 검사는 기계�
 - 입력과 산출물 해시가 같으면 검증된 중간 결과를 재사용한다.
 - 검수 실패 시 전체를 처음부터 돌리지 않고 관련 역할과 그 뒤 단계만 다시 실행한다.
 
+### 역할별 실행 비용 정책
+
+- 추출·전사·해시·이상 후보 탐지·문맥 절단·계산·빌드·구조 검사는 먼저 로컬 Python이 처리한다.
+- 의미 판단은 전체 자료가 아니라 Python이 만든 작은 근거 패킷을 하위 에이전트에 맡긴다.
+- `faithful`은 Luna `high`로 집필하고, 별도 Luna `max`가 모든 source unit의 누락·왜곡·중복을 최종 대조한다.
+- `deep`은 Sol `high`로 집필·설명 보강하고, 별도 Sol `xhigh`가 완성본 전체의 논리·유도·설명 연결을 한 번 검수한다.
+- 최종 Luna `max`/Sol `xhigh` 호출은 상태 파일의 현재 `review_cycle`에서 한 번만 예약된다. source map과 완성본 지문이 같으면 cycle 번호만 바꿔 재호출할 수도 없다. 검수 중 발견한 국소 문제는 같은 호출 안에서 수정하고 바뀐 위치만 재확인한다.
+- Terra와 Sol `max`는 기본 경로에 두지 않는다. 고강도 모델은 작성·최종 검수 또는 16KiB 이하의 실제 미해결 패킷에만 사용하며, 역할 전체 자동 재시도는 하지 않는다.
+- 동시에 실행하는 하위 에이전트는 최대 2개다. 병렬화 때문에 같은 원자료를 여러 번 입력하지 않는다.
+
+Codex용 기본값은 `.codex/config.toml`과 네 개의 프로젝트 역할 프로필에 들어 있다. 다른 에이전트 런타임은 `rules/orchestration.md`의 `local_python`, `economy_high`, `economy_max`, `quality_high`, `quality_xhigh` 의도를 각 제품의 모델에 대응시킨다.
+
 ## 입력
 
 - 강의 교안: PDF, 슬라이드, 문서, 이미지
@@ -261,6 +284,7 @@ Python 통과는 내용이 좋다는 뜻이 아니다. 자동 검사는 기계�
 
 ```text
 gongbu-haja/
+├─ .codex/                      Codex용 저비용 하위 에이전트 기본값·역할 프로필
 ├─ AGENTS.md                    저장소 관리자 에이전트 진입 지침
 ├─ CLAUDE.md                    Claude Code 사용자를 AGENTS.md로 연결
 ├─ SKILL.md                     스킬 진입점(부트스트랩) — skills/ 사본과 동일 유지
@@ -280,6 +304,9 @@ gongbu-haja/
 ├─ scripts/
 │  ├─ transcribe_lecture.py    로컬 faster-whisper 전사(사양 기반 모델 자동 선택)
 │  ├─ transcribe_batch.py      여러 녹음을 한 번에 하나씩 처리하는 전사 큐
+│  ├─ prepare_transcript_review.py  PDF 용어 후보·의심 전사 구간 패킷 생성
+│  ├─ select_review_packets.py  로컬 manifest에서 제한 용량의 검수 패킷 선택
+│  ├─ apply_transcript_corrections.py  승인된 구간 교정의 안전 적용·감사 로그
 │  ├─ record_lecture.py        Windows 온라인 강의 WASAPI 루프백 녹음
 │  ├─ manage_run.py            선택적 역할 계획·상태·입력 해시 관리
 │  ├─ project_types.py         녹음·녹화 형식 단일 정의
@@ -297,7 +324,7 @@ gongbu-haja/
 입력 폴더를 준비한 뒤 강의별 상태 파일을 만든다.
 
 ```powershell
-python scripts/manage_run.py init <입력_폴더> --lecture-id <강의ID> --output-format pdf
+python scripts/manage_run.py init <입력_폴더> --lecture-id <강의ID> --note-mode faithful --output-format pdf
 python scripts/manage_run.py next workspace/<강의ID>/run_state.json
 ```
 
@@ -308,11 +335,39 @@ python scripts/manage_run.py init <입력_폴더> --lecture-id <강의ID> `
   --classify "강의내용메모.txt=transcript"
 ```
 
-관리자 에이전트는 `next`에 표시된 역할만 실제로 호출하고 시작과 완료를 기록한다. 역할의 산출물이 실제로 존재하지 않으면 통과 처리할 수 없다.
+관리자 에이전트는 `next`에 표시된 역할만 실행하고, 함께 반환되는 `execution` 값에 따라 Python 또는 제한된 하위 에이전트에 배정한 뒤 시작과 완료를 기록한다. 역할의 산출물이 실제로 존재하지 않으면 통과 처리할 수 없다.
 
 ```powershell
 python scripts/manage_run.py start workspace/<강의ID>/run_state.json --role source_mapper
-python scripts/manage_run.py complete workspace/<강의ID>/run_state.json --role source_mapper --artifact work/source_map.md
+python scripts/manage_run.py complete workspace/<강의ID>/run_state.json --role source_mapper --artifact work/source_map.json
+```
+
+역할이 실패하면 전체 입력으로 다시 시작할 수 없다. 실패한 위치를 지정한 국소 재검수 한 번만 허용한다.
+
+```powershell
+python scripts/manage_run.py fail workspace/<강의ID>/run_state.json `
+  --role source_mapper --reason "교안 8쪽 대응 근거 부족"
+python scripts/manage_run.py start workspace/<강의ID>/run_state.json `
+  --role source_mapper --repair-scope "교안 8쪽과 연결된 전사 구간만" `
+  --repair-packet "workspace/<강의ID>/review/repair_packet.json"
+```
+
+국소 고강도 검수가 필요하면 첫 의미 작업에서 남은 핵심 항목의 개별 패킷만 다음 게이트에 통과시킨다. 한 강의에서 두 번째 요청, 16KiB 초과 파일, `model_input=true`·`kind=*packet`·명시적 target 계약을 지키지 않은 파일, 역할과 맞지 않는 오류 분류는 거부된다. 실제 모델은 현재 모드와 역할에 따라 Sol `high` 또는 `xhigh`로 반환된다.
+
+```powershell
+python scripts/manage_run.py escalate workspace/<강의ID>/run_state.json `
+  --role transcript_auditor `
+  --packet "workspace/<강의ID>/transcript/<강의ID>_packets/packet_0001.json" `
+  --category proper_noun --reason "교안과 전사의 고유명사 충돌"
+```
+
+최종 검수는 모든 source unit의 처리 상태를 별도 JSON으로 남긴다. 시작할 때 현재 `review_cycle`의 유일한 고비용 검수 호출을 먼저 예약한다. Python 게이트가 ID 누락·중복, 빈 source map, 이유 없는 제외, 표시 위치 없는 미해결 항목을 거부하며, 통과한 source map과 coverage report를 실행 상태에 함께 묶는다.
+
+```powershell
+python scripts/validate_source_coverage.py work/source_map.json work/source_coverage.json
+python scripts/manage_run.py complete workspace/<강의ID>/run_state.json `
+  --role final_reviewer --artifact work/final_review.md `
+  --source-map work/source_map.json --coverage-report work/source_coverage.json
 ```
 
 수식이나 설명 부족이 뒤늦게 발견되면 해당 선택 역할만 활성화한다. 입력이 바뀌지 않은 재실행에서는 통과한 중간 산출물을 재사용하고, 검수 실패 시 관련 역할과 그 하위 단계만 다시 실행한다. 자세한 기준은 `rules/orchestration.md`에 있다.
@@ -321,6 +376,13 @@ python scripts/manage_run.py complete workspace/<강의ID>/run_state.json --role
 
 ```powershell
 python scripts/manage_run.py refresh-inputs workspace/<강의ID>/run_state.json
+```
+
+제작 모드를 바꾸면 전사와 자료 매핑은 유지하고 집필 이후 단계만 다시 실행한다.
+
+```powershell
+python scripts/manage_run.py set-mode workspace/<강의ID>/run_state.json `
+  --note-mode deep --reason "수식 유도와 배경지식 보강 필요"
 ```
 
 자동으로 활성화된 조건부 역할이 자료 확인 결과 불필요하면 이유를 남겨 비활성화한다.
@@ -413,7 +475,7 @@ python scripts/transcribe_lecture.py "C:\자료\음성 260310_과목A.m4a" --dry
 python scripts/transcribe_lecture.py "C:\자료\음성 260310_과목A.m4a"
 ```
 
-교안에서 뽑은 전문용어 목록을 인식 힌트로 제공:
+검수해 확정한 전문용어 목록을 인식 힌트로 제공:
 
 ```powershell
 python scripts/transcribe_lecture.py "C:\자료\음성 260310_과목A.m4a" `
@@ -442,6 +504,36 @@ GPU 없음       → 실행 가능하나 1시간 강의당 약 20~40분 소요 (
 
 기존 동일 산출물은 자동으로 덮어쓰지 않는다. 의도적으로 교체하는 경우에만 `--force`를 사용한다.
 
+전사가 끝난 뒤 Python으로 용어 후보와 검수할 구간만 추린다. 이 명령은 전사를 고치지 않으며, PDF에서 발견한 표현도 최종 전문용어로 확정하지 않는다.
+
+```powershell
+python scripts/prepare_transcript_review.py `
+  --segments "workspace/<lecture_id>/transcript/<lecture_id>_segments.json" `
+  --handout "C:\자료\교안.pdf" `
+  --output-dir "workspace/<lecture_id>/transcript" `
+  --prefix "<lecture_id>"
+```
+
+`*_term_candidates.json`은 전체 용어 후보 캐시이고 `*_review_packets.json`은 요약·경로만 담은 로컬 색인이다. manifest를 포함한 세 파일은 `model_input=false`라서 모델에 전달하지 않는다. 아래 selector가 고른 `*_packets/packet_NNNN.json`만 합계 16KiB 이하로 전사 검수 하위 에이전트에 전달한다. 각 개별 패킷은 `model_input=true`이며 관련 용어 후보를 최대 6개만 포함한다.
+
+manifest도 모델이 읽지 않는다. 다음 로컬 selector가 실제 ASR 이상을 단순 숫자·평가조건 후보보다 먼저 고르고, 선택 결과 총합을 기본 16KiB 아래로 제한한다. 필요하면 `--reason`이나 `--segment-id`를 반복해 정확한 후보만 고른다. 출력 경로는 manifest 폴더 기준 상대 경로다.
+
+```powershell
+python scripts/select_review_packets.py `
+  "workspace/<lecture_id>/transcript/<lecture_id>_review_packet_manifest.json" `
+  --max-total-bytes 16384
+```
+
+검수 에이전트는 자동 치환을 직접 하지 않고 `source_segments_sha256`, `segment_id`, 정확한 `original`, `action`, `replacement`, `verification`, `rationale`를 담은 결정 JSON을 만든다. Python은 해시와 현재 원문이 모두 일치할 때만 파생 검수본에 적용한다.
+
+```powershell
+python scripts/apply_transcript_corrections.py `
+  "workspace/<lecture_id>/transcript/<lecture_id>_segments.json" `
+  "workspace/<lecture_id>/transcript/<lecture_id>_correction_decisions.json" `
+  --output-dir "workspace/<lecture_id>/transcript" `
+  --prefix "<lecture_id>"
+```
+
 ## 전사 산출물
 
 ```text
@@ -461,7 +553,7 @@ SRT는 타임스탬프 기준 원시 전사, TXT는 검색용 원문, Markdown�
 
 ```powershell
 python scripts/validate_agent_setup.py --strict
-python -m unittest scripts.test_manage_run scripts.test_validate_note_output scripts.test_record_lecture scripts.test_transcribe_lecture scripts.test_transcribe_batch
+python -m unittest scripts.test_manage_run scripts.test_validate_note_output scripts.test_record_lecture scripts.test_transcribe_lecture scripts.test_transcribe_batch scripts.test_prepare_transcript_review scripts.test_select_review_packets scripts.test_apply_transcript_corrections
 ```
 
 전사 패키지:

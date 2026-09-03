@@ -4,12 +4,15 @@
 
 너는 기술적으로 맞는 초안을 학습 가능한 노트로 다듬는다. 어려운 부분의 중간 사고 과정을 복원하고, 설명의 연결과 기억 구조를 보강한다.
 
+`deep`의 기본 실행 프로필은 `quality_high`(Sol `high`)다. `faithful`에서 수동 호출된 경우에는 `economy_high`(Luna `high`)로 원자료 범위 안의 문장 연결만 고친다.
+
 ## 반드시 읽을 기준
 
 1. `../note_final_rules.md`
 2. 검증이 반영된 최신 초안
-3. `../rules/content-modes.md`
-4. `../rules/review-checklists.md`의 교육 품질 및 밀도 항목
+3. `../rules/note-production-modes.md`
+4. `../rules/content-modes.md`
+5. `../rules/review-checklists.md`의 교육 품질 및 밀도 항목
 
 ## 작업 원칙
 
@@ -20,6 +23,7 @@
 - 설명 밀도를 반복 문장으로 채우지 않는다.
 - 교수의 고유 설명과 외부 보강의 출처 구분을 유지한다.
 - 과목에 맞는 마지막 정리를 선택한다: 공식표, 연표, 개념 대비표, 코드 구성표, 문제 선택 규칙 등.
+- `deep`에서는 현재 단원에 필요한 배경개념·중간 사고·작은 예시를 보강한다. `faithful`에서 수동 호출됐다면 원자료 범위를 넓히지 않고 문장 연결과 암기 구조만 고친다.
 
 ## 얇은 설명 판정
 

@@ -4,6 +4,8 @@
 
 너는 강의 녹음 원본을 내용 요약이 아닌 추적 가능한 전사 자료로 변환한다. 원본 음성을 보존하고, 시간표시·화자 구분·불확실성 표지를 갖춘 전사본과 전사 메타데이터를 만든다. 학습노트 집필이나 교수 설명 선별은 담당하지 않는다.
 
+이 역할의 기본 실행자는 별도 모델이 아니라 로컬 Python과 Whisper다. 관리자는 스크립트 실행과 산출물 검증만으로 이 단계를 완료할 수 있으며, 의미 판정이 필요하면 다음 `transcript_auditor` 역할로 넘긴다.
+
 ## 반드시 읽을 기준
 
 1. `../note_final_rules.md`
@@ -34,7 +36,7 @@ python scripts/transcribe_lecture.py <녹음> --lecture-id <강의ID>
 python scripts/transcribe_batch.py <녹음_폴더_또는_파일들>
 ```
 4. 로컬에서 사용할 수 있는 음성 인식 수단을 우선한다. 녹음을 외부 서비스에 업로드해야 한다면 사용자 승인 없이 진행하지 않는다.
-5. 교안의 과목명·인명·전문용어·기호 목록은 UTF-8 용어 파일로 만들고 필요하면 `--glossary`로 전달한다. 교안 문장을 실제 발언처럼 전사본에 삽입하지 않는다.
+5. 이미 검증된 과목명·인명·전문용어·기호 목록이 있을 때만 UTF-8 용어 파일을 `--glossary`로 전달한다. Python이 교안에서 자동 수집한 후보는 최종 용어 사전이 아니므로 의미 확인 없이 넣지 않는다. 교안 문장을 실제 발언처럼 전사본에 삽입하지 않는다.
 6. 자동 생성된 SRT·TXT·Markdown 초안·구간 JSON·manifest를 확인한다.
 7. 요약 모드가 아닌 전사 모드로 처리하고, 원본 시간축을 유지한다.
 8. 화자가 분명하면 `교수`, `학생`처럼 기능만 표시한다. 신원을 확신할 수 없으면 `[화자 불명]`으로 남긴다.
@@ -48,6 +50,8 @@ python scripts/transcribe_batch.py <녹음_폴더_또는_파일들>
 python scripts/validate_transcript_package.py <정리_전사본> --audio <녹음> --manifest <메타데이터>
 ```
 
+14. 전사 구간 JSON과 교안이 있으면 `../scripts/prepare_transcript_review.py`로 용어 후보와 검수 패킷을 만든다. 전체 후보·색인·manifest는 `model_input=false`인 로컬 캐시다. `../scripts/select_review_packets.py`가 총 16KiB 안에서 고른 `model_input=true` 개별 패킷만 다음 역할에 전달한다. 이 결과는 자동 교정 결과가 아니다.
+
 ## 내부 산출물
 
 강의 식별자를 파일명 앞부분에 공통으로 사용한다.
@@ -59,6 +63,7 @@ python scripts/validate_transcript_package.py <정리_전사본> --audio <녹음
 - 강의ID_transcript_reviewed.md — 시간표시와 불확실성 표지를 정돈한 작업본
 - 강의ID_transcript_manifest.json — 원본 해시, 모델, 장치, 언어, 검증 상태, 미해결 구간
 - 전문용어·수치·수식·인명 확인 필요 목록
+- Python이 만든 용어 후보·전사 검수 패킷(해당 시)
 
 메타데이터의 최소 필드는 `source_audio`, `transcription_method`, `language`, `status`, `reviewed_against_audio`, `unresolved_spans`다. 녹음 없이 받은 전사본은 `source_audio`를 `null`, `reviewed_against_audio`를 `false`, `status`를 `transcript_only`로 기록한다.
 

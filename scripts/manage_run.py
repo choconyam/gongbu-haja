@@ -22,8 +22,10 @@ from typing import Any
 
 try:
     from .project_types import AUDIO_SUFFIXES
+    from .validate_source_coverage import CoverageValidationError, validate_coverage
 except ImportError:  # `python scripts/manage_run.py`로 직접 실행할 때
     from project_types import AUDIO_SUFFIXES
+    from validate_source_coverage import CoverageValidationError, validate_coverage
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -36,7 +38,259 @@ if hasattr(sys.stderr, "reconfigure"):
 # 역할 순서와 파일 확장자 분류 기준은 모든 실행 상태가 공유한다.
 # -----------------------------------------------------------------------------
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+LEGACY_SCHEMA_VERSIONS = {1}
+DEFAULT_NOTE_MODE = "faithful"
+NOTE_MODE_CONFIG = {
+    "faithful": {
+        "label": "자료 충실형",
+        "description": "교안과 검수된 교수 설명만 간결하게 정리하고 외부 배경지식·새 유도는 추가하지 않음",
+        "external_enrichment": False,
+        "pedagogy_editor_default": False,
+    },
+    "deep": {
+        "label": "심화 이해형",
+        "description": "필요한 배경지식·중간 사고·유도 과정·예시를 보강하고 보강 내용을 원자료와 구분함",
+        "external_enrichment": True,
+        "pedagogy_editor_default": True,
+    },
+}
+NOTE_MODES = tuple(NOTE_MODE_CONFIG)
+
+# 모델 이름 자체보다 실행 책임을 먼저 고정한다. 결정적으로 끝낼 수 있는 일은
+# 모델에 보내지 않고, 의미 판단이 필요한 좁은 입력만 저비용 서브에이전트에
+# 전달한다. Codex 외 런타임은 같은 profile의 의도를 해당 제품 모델에 매핑한다.
+EXECUTION_PROFILES = {
+    "local_python": {
+        "executor": "python",
+        "description": "로컬 Python·CLI로 결정적 처리; 모델 호출 없음",
+        "codex_agent": None,
+        "codex_model": None,
+        "reasoning_effort": None,
+    },
+    "economy_high": {
+        "executor": "subagent",
+        "description": "반복적·범위 제한 의미 작업과 자료 충실형 집필",
+        "codex_agent": "study_note_worker",
+        "codex_model": "gpt-5.6-luna",
+        "reasoning_effort": "high",
+    },
+    "economy_max": {
+        "executor": "subagent",
+        "description": "자료 충실형의 독립 누락·왜곡 최종 대조",
+        "codex_agent": "faithful_note_reviewer",
+        "codex_model": "gpt-5.6-luna",
+        "reasoning_effort": "max",
+    },
+    "quality_high": {
+        "executor": "subagent",
+        "description": "심화 집필·통합 또는 자료 충실형의 국소 의미 충돌 해결",
+        "codex_agent": "quality_note_worker",
+        "codex_model": "gpt-5.6-sol",
+        "reasoning_effort": "high",
+    },
+    "quality_xhigh": {
+        "executor": "subagent",
+        "description": "심화 이해형 완성본의 독립 논리·유도 최종 검수",
+        "codex_agent": "deep_note_reviewer",
+        "codex_model": "gpt-5.6-sol",
+        "reasoning_effort": "xhigh",
+    },
+}
+
+COST_POLICY = {
+    "deterministic_first": True,
+    "default_subagent_profile": "economy_high",
+    "faithful_writer_profile": "economy_high",
+    "faithful_final_review_profile": "economy_max",
+    "deep_writer_profile": "quality_high",
+    "deep_final_review_profile": "quality_xhigh",
+    "targeted_escalation_profiles": ["quality_high", "quality_xhigh"],
+    "automatic_flagship_escalation": False,
+    "terra_enabled": False,
+    "full_role_retries": 0,
+    "targeted_repairs": 1,
+    "targeted_escalations": 1,
+    "premium_final_reviews_per_cycle": 1,
+    "max_agent_packet_bytes": 16 * 1024,
+    "rule": "결정적 누락 게이트 뒤 모드별 작성·검수를 한 번 실행하고 실패 범위만 국소 재검수",
+}
+
+MAX_REPAIR_SCOPE_CHARS = 240
+MAX_AGENT_PACKET_BYTES = int(COST_POLICY["max_agent_packet_bytes"])
+CRITICAL_REVIEW_LIMIT = int(COST_POLICY["targeted_escalations"])
+PREMIUM_FINAL_REVIEW_LIMIT = int(COST_POLICY["premium_final_reviews_per_cycle"])
+CRITICAL_REVIEW_CATEGORIES = (
+    "number",
+    "proper_noun",
+    "formula",
+    "assessment_condition",
+    "source_conflict",
+    "coverage_ambiguity",
+    "logic_gap",
+    "derivation_gap",
+    "instructor_distortion",
+    "final_blocker",
+)
+
+# 국소 승격은 역할 이름만 보고 허용하지 않는다. 첫 의미 작업에서 실제로 남은
+# 위험 종류까지 일치해야 하며, 강의 전체에서 패킷 하나만 사용할 수 있다.
+ESCALATION_RULES: dict[str, dict[str, set[str]]] = {
+    "faithful": {
+        "transcript_auditor": {"number", "proper_noun", "formula", "assessment_condition"},
+        "source_mapper": {
+            "number",
+            "proper_noun",
+            "formula",
+            "assessment_condition",
+            "source_conflict",
+            "coverage_ambiguity",
+            "instructor_distortion",
+        },
+        "writer": {"source_conflict", "coverage_ambiguity", "instructor_distortion"},
+        "instructor_integrator": {"source_conflict", "instructor_distortion"},
+        "formula_code_checker": {"number", "formula", "source_conflict"},
+        "pedagogy_editor": {"coverage_ambiguity", "instructor_distortion"},
+        "final_reviewer": {
+            "source_conflict",
+            "coverage_ambiguity",
+            "instructor_distortion",
+            "final_blocker",
+        },
+    },
+    "deep": {
+        "transcript_auditor": {"number", "proper_noun", "formula", "assessment_condition"},
+        "source_mapper": {
+            "number",
+            "proper_noun",
+            "formula",
+            "assessment_condition",
+            "source_conflict",
+            "coverage_ambiguity",
+            "instructor_distortion",
+        },
+        "writer": {"source_conflict", "logic_gap", "derivation_gap", "instructor_distortion"},
+        "instructor_integrator": {"source_conflict", "instructor_distortion"},
+        "formula_code_checker": {"number", "formula", "source_conflict", "derivation_gap"},
+        "pedagogy_editor": {"logic_gap", "derivation_gap", "instructor_distortion"},
+    },
+}
+
+PREMIUM_FINAL_REVIEW_ROUTES = {
+    "faithful": {
+        "route": "faithful_final_luna_max",
+        "profile": "economy_max",
+    },
+    "deep": {
+        "route": "deep_final_sol_xhigh",
+        "profile": "quality_xhigh",
+    },
+}
+
+def role_execution_policy(note_mode: str) -> dict[str, dict[str, Any]]:
+    """제작 모드별로 실제 모델 책임을 고정한다.
+
+    자료 추출·색인·빌드는 모드와 무관하게 Python/Luna 경로를 유지한다.
+    심화 이해형의 집필·의미 통합은 Sol high, 독립 최종 검수는 Sol xhigh다.
+    """
+
+    if note_mode not in NOTE_MODE_CONFIG:
+        raise RunError(f"지원하지 않는 학습노트 제작 모드입니다: {note_mode}")
+    deep = note_mode == "deep"
+    author_profile = "quality_high" if deep else "economy_high"
+    author_escalation = "quality_xhigh" if deep else "quality_high"
+    final_profile = "quality_xhigh" if deep else "economy_max"
+    return {
+        "transcriber": {
+            "executor": "python",
+            "primary_profile": "local_python",
+            "agent_profile": None,
+            "repair_profile": "local_python",
+            "escalation_profile": None,
+            "scope": "로컬 음성 인식과 전사 패키지 생성",
+        },
+        "transcript_auditor": {
+            "executor": "hybrid",
+            "primary_profile": "local_python",
+            "agent_profile": "economy_high",
+            "repair_profile": "economy_high",
+            "escalation_profile": "quality_high",
+            "scope": "Python이 이상 후보와 문맥 패킷을 만들고 Luna high가 의미를 판정",
+        },
+        "source_mapper": {
+            "executor": "hybrid",
+            "primary_profile": "local_python",
+            "agent_profile": "economy_high",
+            "repair_profile": "economy_high",
+            "escalation_profile": "quality_high",
+            "scope": "Python 인벤토리·안정 ID 뒤 Luna high가 자료 간 의미 대응을 판정",
+        },
+        "writer": {
+            "executor": "subagent",
+            "primary_profile": author_profile,
+            "agent_profile": author_profile,
+            "repair_profile": author_profile,
+            "escalation_profile": author_escalation,
+            "scope": (
+                "단원별 근거 패킷으로 배경·중간 사고·유도를 포함한 심화 노트 작성"
+                if deep
+                else "페이지별 근거 패킷만 사용해 자료 충실형 노트 작성"
+            ),
+        },
+        "instructor_integrator": {
+            "executor": "subagent",
+            "primary_profile": author_profile,
+            "agent_profile": author_profile,
+            "repair_profile": author_profile,
+            "escalation_profile": author_escalation,
+            "scope": "누락이 확인된 교수 고유 설명만 현재 노트에 반영",
+        },
+        "formula_code_checker": {
+            "executor": "hybrid",
+            "primary_profile": "local_python",
+            "agent_profile": author_profile,
+            "repair_profile": author_profile,
+            "escalation_profile": author_escalation,
+            "scope": "Python 계산·실행·컴파일 뒤 선택 모드의 의미 모델이 설명을 검수",
+        },
+        "pedagogy_editor": {
+            "executor": "subagent",
+            "primary_profile": author_profile,
+            "agent_profile": author_profile,
+            "repair_profile": author_profile,
+            "escalation_profile": author_escalation,
+            "scope": "지정된 절의 이해 흐름과 필요한 중간 사고만 보강",
+        },
+        "layout_builder": {
+            "executor": "hybrid",
+            "primary_profile": "local_python",
+            "agent_profile": "economy_high",
+            "repair_profile": "economy_high",
+            "escalation_profile": None,
+            "scope": "Python 빌드·렌더·구조 검사 뒤 필요한 페이지만 시각 검수",
+        },
+        "final_reviewer": {
+            "executor": "subagent",
+            "primary_profile": final_profile,
+            "agent_profile": final_profile,
+            "repair_profile": None,
+            "escalation_profile": "quality_high" if not deep else None,
+            "scope": (
+                "완성본 전체를 한 번 읽고 논리·유도·교수 설명 왜곡을 독립 검수"
+                if deep
+                else "전 source unit을 최종 노트와 대조해 누락·왜곡·중복을 독립 검수"
+            ),
+        },
+        "maintainer": {
+            "executor": "python",
+            "primary_profile": "local_python",
+            "agent_profile": None,
+            "repair_profile": "local_python",
+            "escalation_profile": None,
+            "scope": "검증된 최종 파일의 이동·목록·해시 기록",
+        },
+    }
+
 ROLE_ORDER = (
     "transcriber",
     "transcript_auditor",
@@ -85,6 +339,17 @@ class RunError(RuntimeError):
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def new_cost_usage() -> dict[str, Any]:
+    """새 실행의 누적 비용 원장을 만든다."""
+
+    return {
+        "critical_review_limit": CRITICAL_REVIEW_LIMIT,
+        "critical_reviews": [],
+        "premium_final_review_limit_per_cycle": PREMIUM_FINAL_REVIEW_LIMIT,
+        "premium_final_reviews": [],
+    }
 
 
 def sha256_file(path: Path) -> str:
@@ -215,6 +480,14 @@ def role_entry(active: bool, reason: str, dependencies: list[str]) -> dict[str, 
         "dependencies": dependencies,
         "prompt": "",
         "attempts": 0,
+        "max_attempts": 2,
+        "repair_scope": None,
+        "repair_packet": None,
+        "active_profile": None,
+        "critical_review_call_id": None,
+        "premium_call_id": None,
+        "coverage_gate": None,
+        "rerun_count": 0,
         "started_at": None,
         "completed_at": None,
         "artifacts": [],
@@ -222,7 +495,13 @@ def role_entry(active: bool, reason: str, dependencies: list[str]) -> dict[str, 
     }
 
 
-def make_roles(items: list[dict[str, Any]], output_format: str) -> dict[str, dict[str, Any]]:
+def make_roles(
+    items: list[dict[str, Any]],
+    output_format: str,
+    note_mode: str = DEFAULT_NOTE_MODE,
+) -> dict[str, dict[str, Any]]:
+    if note_mode not in NOTE_MODE_CONFIG:
+        raise RunError(f"지원하지 않는 학습노트 제작 모드입니다: {note_mode}")
     kinds = {item["kind"] for item in items}
     has_audio = "audio" in kinds
     has_transcript = "transcript" in kinds
@@ -268,7 +547,16 @@ def make_roles(items: list[dict[str, Any]], output_format: str) -> dict[str, dic
         "코드 파일이 발견됨" if formula_active else "초기 자동 판정에서 코드 파일 없음; 수식 발견 시 활성화",
         ["writer"],
     )
-    roles["pedagogy_editor"] = role_entry(False, "설명 부족 판정 시에만 활성화", ["writer"])
+    pedagogy_active = bool(NOTE_MODE_CONFIG[note_mode]["pedagogy_editor_default"])
+    roles["pedagogy_editor"] = role_entry(
+        pedagogy_active,
+        (
+            "심화 이해형의 배경지식·중간 사고·유도 과정 보강"
+            if pedagogy_active
+            else "자료 충실형에서는 추가 설명 보강을 기본 생략"
+        ),
+        ["writer"],
+    )
 
     layout_dependencies = ["writer"]
     for role in ("instructor_integrator", "formula_code_checker", "pedagogy_editor"):
@@ -276,14 +564,19 @@ def make_roles(items: list[dict[str, Any]], output_format: str) -> dict[str, dic
             layout_dependencies.append(role)
     roles["layout_builder"] = role_entry(True, f"{output_format} 최종 형식 생성", layout_dependencies)
     roles["final_reviewer"] = role_entry(True, "독립 최종 검수", ["layout_builder"])
+    # 완성본 전체를 읽는 고비용 검수는 한 review cycle에 정확히 한 번만 실행한다.
+    # 발견된 문제는 같은 호출 안에서 국소 수정·해당 위치 재확인까지 끝낸다.
+    roles["final_reviewer"]["max_attempts"] = 1
     roles["maintainer"] = role_entry(
         False,
         "복수 최종 파일의 이동·패키징·전달 정리가 필요할 때만 활성화",
         ["final_reviewer"],
     )
 
+    execution_policy = role_execution_policy(note_mode)
     for name, entry in roles.items():
         entry["prompt"] = ROLE_PROMPTS[name]
+        entry["execution"] = dict(execution_policy[name])
     refresh_statuses(roles)
     return roles
 
@@ -347,6 +640,10 @@ def apply_role_overrides(
             entry["reason"] = override.get("reason", "관리자 수동 비활성화")
             entry["status"] = "skipped"
             entry["artifacts"] = []
+            entry["active_profile"] = None
+            entry["critical_review_call_id"] = None
+            entry["premium_call_id"] = None
+            entry["coverage_gate"] = None
 
     normalize_dependencies(roles)
     if roles["instructor_integrator"]["active"] and not roles["transcript_auditor"]["active"]:
@@ -443,13 +740,106 @@ def read_state(path: Path) -> dict[str, Any]:
         state = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RunError(f"실행 상태 파일을 읽을 수 없습니다: {exc}") from exc
+    state = migrate_state(state)
     validate_state_shape(state)
+    return state
+
+
+def migrate_state(state: dict[str, Any]) -> dict[str, Any]:
+    """v1 상태를 비용 원장이 있는 v2 계약으로 메모리에서 안전하게 올린다."""
+
+    version = state.get("schema_version")
+    if version == SCHEMA_VERSION:
+        return state
+    if version not in LEGACY_SCHEMA_VERSIONS:
+        return state
+
+    note_mode = state.get("note_mode")
+    if note_mode not in NOTE_MODE_CONFIG:
+        note_mode = DEFAULT_NOTE_MODE
+    state["schema_version"] = SCHEMA_VERSION
+    state["note_mode"] = note_mode
+    state["mode_contract"] = NOTE_MODE_CONFIG[note_mode]
+    state["execution_profiles"] = EXECUTION_PROFILES
+    state["cost_policy"] = COST_POLICY
+    state.setdefault("review_cycle", 1)
+
+    old_usage = state.get("cost_usage")
+    usage = new_cost_usage()
+    if isinstance(old_usage, dict):
+        reviews = old_usage.get("critical_reviews")
+        if isinstance(reviews, list):
+            usage["critical_reviews"] = reviews[:CRITICAL_REVIEW_LIMIT]
+        premium_reviews = old_usage.get("premium_final_reviews")
+        if isinstance(premium_reviews, list):
+            usage["premium_final_reviews"] = premium_reviews
+    state["cost_usage"] = usage
+
+    policy = role_execution_policy(note_mode)
+    roles = state.get("roles")
+    if isinstance(roles, dict):
+        for name, entry in roles.items():
+            if name not in policy or not isinstance(entry, dict):
+                continue
+            entry["execution"] = dict(policy[name])
+            entry["max_attempts"] = 1 if name == "final_reviewer" else 2
+            if name == "final_reviewer" and isinstance(entry.get("attempts"), int):
+                entry["attempts"] = min(entry["attempts"], 1)
+            entry.setdefault("active_profile", None)
+            entry.setdefault("critical_review_call_id", None)
+            entry.setdefault("premium_call_id", None)
+            entry.setdefault("coverage_gate", None)
+
+        final_entry = roles.get("final_reviewer")
+        if isinstance(final_entry, dict) and final_entry.get("attempts", 0) > 0:
+            route = PREMIUM_FINAL_REVIEW_ROUTES[note_mode]
+            call_id = f"migrated-{note_mode}-cycle-{state['review_cycle']}"
+            try:
+                input_fingerprint = final_review_input_fingerprint(state)
+            except RunError:
+                input_fingerprint = hashlib.sha256(
+                    f"legacy-unverified:{state.get('lecture_id')}:{note_mode}".encode("utf-8")
+                ).hexdigest()
+            status = final_entry.get("status")
+            call_status = status if status in {"running", "passed", "failed"} else "failed"
+            usage["premium_final_reviews"].append(
+                {
+                    "call_id": call_id,
+                    "review_cycle": state["review_cycle"],
+                    "note_mode": note_mode,
+                    "role": "final_reviewer",
+                    "route": route["route"],
+                    "profile": route["profile"],
+                    "model": EXECUTION_PROFILES[route["profile"]]["codex_model"],
+                    "reasoning_effort": EXECUTION_PROFILES[route["profile"]]["reasoning_effort"],
+                    "attempt_kind": "full_note_audit",
+                    "input_fingerprint": input_fingerprint,
+                    "status": call_status,
+                    "started_at": final_entry.get("started_at") or state.get("created_at"),
+                    "completed_at": final_entry.get("completed_at"),
+                    "migrated_from_schema": version,
+                }
+            )
+            final_entry["premium_call_id"] = call_id
+    events = state.setdefault("events", [])
+    events.append(
+        {
+            "at": now_iso(),
+            "event": "state_migrated",
+            "role": "manager",
+            "detail": f"schema {version} -> {SCHEMA_VERSION}",
+        }
+    )
     return state
 
 
 def validate_state_shape(state: dict[str, Any]) -> None:
     if state.get("schema_version") != SCHEMA_VERSION:
         raise RunError(f"지원하지 않는 실행 상태 버전입니다: {state.get('schema_version')}")
+    note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
+    if note_mode not in NOTE_MODE_CONFIG:
+        raise RunError(f"알 수 없는 학습노트 제작 모드입니다: {note_mode}")
+    expected_execution_policy = role_execution_policy(note_mode)
     roles = state.get("roles")
     if not isinstance(roles, dict) or set(roles) != set(ROLE_ORDER):
         raise RunError("실행 상태의 역할 목록이 현재 프로젝트와 일치하지 않습니다.")
@@ -459,6 +849,102 @@ def validate_state_shape(state: dict[str, Any]) -> None:
         for dependency in entry.get("dependencies", []):
             if dependency not in roles:
                 raise RunError(f"알 수 없는 선행 역할입니다: {name} -> {dependency}")
+        execution = entry.get("execution")
+        if execution is not None:
+            if not isinstance(execution, dict) or execution.get("executor") not in {
+                "python",
+                "subagent",
+                "hybrid",
+            }:
+                raise RunError(f"알 수 없는 역할 실행 방식입니다: {name}={execution}")
+            if execution != expected_execution_policy[name]:
+                raise RunError(f"역할 실행 정책이 프로젝트 기준과 일치하지 않습니다: {name}")
+        attempts = entry.get("attempts", 0)
+        expected_max_attempts = 1 if name == "final_reviewer" else 2
+        max_attempts = entry.get("max_attempts", expected_max_attempts)
+        if (
+            not isinstance(attempts, int)
+            or isinstance(attempts, bool)
+            or not 0 <= attempts <= expected_max_attempts
+        ):
+            raise RunError(f"역할 시도 횟수가 잘못됐습니다: {name}={attempts}")
+        if max_attempts != expected_max_attempts:
+            raise RunError(f"역할 시도 한도가 프로젝트 기준과 일치하지 않습니다: {name}={max_attempts}")
+        active_profile = entry.get("active_profile")
+        if active_profile is not None and active_profile not in EXECUTION_PROFILES:
+            raise RunError(f"알 수 없는 실제 실행 프로필입니다: {name}={active_profile}")
+    if state.get("execution_profiles") is not None and state["execution_profiles"] != EXECUTION_PROFILES:
+        raise RunError("실행 프로필이 프로젝트 비용 정책과 일치하지 않습니다.")
+    if state.get("cost_policy") is not None and state["cost_policy"] != COST_POLICY:
+        raise RunError("비용 정책이 프로젝트 기준과 일치하지 않습니다.")
+    cost_usage = state.get("cost_usage")
+    if cost_usage is not None:
+        if not isinstance(cost_usage, dict):
+            raise RunError("cost_usage는 객체여야 합니다.")
+        if cost_usage.get("critical_review_limit") != CRITICAL_REVIEW_LIMIT:
+            raise RunError("고강도 국소 재검수 제한값이 프로젝트 정책과 일치하지 않습니다.")
+        reviews = cost_usage.get("critical_reviews")
+        if not isinstance(reviews, list) or len(reviews) > CRITICAL_REVIEW_LIMIT:
+            raise RunError("고강도 국소 재검수 기록이 허용 한도를 초과했습니다.")
+        critical_ids: set[str] = set()
+        for review in reviews:
+            if not isinstance(review, dict):
+                raise RunError("고강도 국소 재검수 기록은 객체여야 합니다.")
+            call_id = review.get("call_id")
+            if not isinstance(call_id, str) or not call_id or call_id in critical_ids:
+                raise RunError("고강도 국소 재검수 call_id가 없거나 중복됐습니다.")
+            critical_ids.add(call_id)
+            review_mode = review.get("note_mode")
+            if review_mode not in NOTE_MODE_CONFIG:
+                raise RunError("고강도 국소 재검수 note_mode가 올바르지 않습니다.")
+            role = review.get("role")
+            category = review.get("category")
+            review_policy = role_execution_policy(review_mode)
+            allowed = ESCALATION_RULES.get(review_mode, {}).get(role, set())
+            if category not in allowed:
+                raise RunError("고강도 국소 재검수 역할·분류가 기록된 모드 정책과 다릅니다.")
+            expected_profile = review_policy[role].get("escalation_profile")
+            if review.get("profile") != expected_profile:
+                raise RunError("고강도 국소 재검수 프로필이 기록된 모드 정책과 다릅니다.")
+            profile = EXECUTION_PROFILES[expected_profile]
+            if (
+                review.get("model") != profile["codex_model"]
+                or review.get("reasoning_effort") != profile["reasoning_effort"]
+                or review.get("attempt_kind") != "targeted_escalation"
+            ):
+                raise RunError("고강도 국소 재검수 실행 계약이 올바르지 않습니다.")
+            if review.get("status") not in {"running", "passed", "failed"}:
+                raise RunError("고강도 국소 재검수 상태가 올바르지 않습니다.")
+        if cost_usage.get("premium_final_review_limit_per_cycle") != PREMIUM_FINAL_REVIEW_LIMIT:
+            raise RunError("완성본 고비용 검수 제한값이 프로젝트 정책과 일치하지 않습니다.")
+        premium_reviews = cost_usage.get("premium_final_reviews")
+        if not isinstance(premium_reviews, list):
+            raise RunError("완성본 고비용 검수 원장이 올바르지 않습니다.")
+        seen_cycles: set[tuple[int, str]] = set()
+        for call in premium_reviews:
+            if not isinstance(call, dict):
+                raise RunError("완성본 고비용 검수 기록은 객체여야 합니다.")
+            cycle = call.get("review_cycle")
+            mode = call.get("note_mode")
+            if not isinstance(cycle, int) or isinstance(cycle, bool) or cycle < 1:
+                raise RunError("완성본 고비용 검수 review_cycle이 올바르지 않습니다.")
+            if mode not in PREMIUM_FINAL_REVIEW_ROUTES:
+                raise RunError("완성본 고비용 검수 note_mode가 올바르지 않습니다.")
+            cycle_key = (cycle, mode)
+            if cycle_key in seen_cycles:
+                raise RunError("같은 review cycle에 완성본 고비용 검수가 두 번 기록됐습니다.")
+            seen_cycles.add(cycle_key)
+            route = PREMIUM_FINAL_REVIEW_ROUTES[mode]
+            if call.get("route") != route["route"] or call.get("profile") != route["profile"]:
+                raise RunError("완성본 고비용 검수 라우팅 기록이 프로젝트 기준과 다릅니다.")
+            fingerprint = call.get("input_fingerprint")
+            if not isinstance(fingerprint, str) or re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None:
+                raise RunError("완성본 고비용 검수 입력 지문이 올바르지 않습니다.")
+            if call.get("status") not in {"running", "passed", "failed"}:
+                raise RunError("완성본 고비용 검수 상태가 올바르지 않습니다.")
+    review_cycle = state.get("review_cycle")
+    if not isinstance(review_cycle, int) or isinstance(review_cycle, bool) or review_cycle < 1:
+        raise RunError("review_cycle은 1 이상의 정수여야 합니다.")
 
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
@@ -477,6 +963,117 @@ def resolve_artifact(raw: str, state_file: Path) -> Path:
     return path
 
 
+def resolve_model_packet(raw: str, state_file: Path) -> tuple[Path, dict[str, Any]]:
+    """모델에 전달할 JSON 패킷이 작고 명시적으로 허용됐는지 검사한다."""
+
+    path = resolve_artifact(raw, state_file)
+    if not path.is_file():
+        raise RunError(f"모델 입력 패킷은 JSON 파일이어야 합니다: {path}")
+    size = path.stat().st_size
+    if size < 1 or size > MAX_AGENT_PACKET_BYTES:
+        raise RunError(
+            f"모델 입력 패킷 크기는 1~{MAX_AGENT_PACKET_BYTES}바이트여야 합니다: "
+            f"{size}바이트"
+        )
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RunError(f"모델 입력 패킷 JSON을 읽을 수 없습니다: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("model_input") is not True:
+        raise RunError("모델 입력 패킷에는 model_input=true가 명시되어야 합니다.")
+    kind = payload.get("kind")
+    if (
+        not isinstance(kind, str)
+        or not kind.strip()
+        or "manifest" in kind.lower()
+        or "aggregate" in kind.lower()
+        or not kind.lower().endswith("packet")
+    ):
+        raise RunError("모델 입력은 aggregate/manifest가 아닌 kind=*packet 개별 패킷이어야 합니다.")
+    target_fields = (
+        "target",
+        "target_segments",
+        "source_unit_id",
+        "source_unit_ids",
+        "note_refs",
+    )
+    if not any(payload.get(field) for field in target_fields):
+        raise RunError("개별 모델 입력 패킷에는 제한된 target 범위가 있어야 합니다.")
+    return path, artifact_record(path)
+
+
+def read_json_object(path: Path, label: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RunError(f"{label} JSON을 읽을 수 없습니다: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RunError(f"{label} JSON의 최상위 값은 객체여야 합니다.")
+    return payload
+
+
+def artifact_was_recorded(records: list[dict[str, Any]], path: Path) -> bool:
+    resolved = path.resolve()
+    return any(
+        isinstance(record, dict)
+        and Path(str(record.get("path", ""))).resolve() == resolved
+        and artifact_matches(record)
+        for record in records
+    )
+
+
+def build_coverage_gate(
+    state: dict[str, Any],
+    state_file: Path,
+    source_map_raw: str | None,
+    coverage_report_raw: str | None,
+) -> tuple[dict[str, Any], Path]:
+    """최종 검수의 source-unit 완전성과 모드별 독립 검수 프로필을 강제한다."""
+
+    if not source_map_raw or not coverage_report_raw:
+        raise RunError(
+            "final_reviewer 완료에는 --source-map과 --coverage-report가 모두 필요합니다."
+        )
+    source_map_path = resolve_artifact(source_map_raw, state_file)
+    coverage_path = resolve_artifact(coverage_report_raw, state_file)
+    mapper_artifacts = state["roles"]["source_mapper"].get("artifacts", [])
+    if not artifact_was_recorded(mapper_artifacts, source_map_path):
+        raise RunError(
+            "--source-map은 통과한 source_mapper가 직접 기록한 변경되지 않은 산출물이어야 합니다."
+        )
+    try:
+        _source_ids, summary = validate_coverage(source_map_path, coverage_path)
+    except CoverageValidationError as exc:
+        details = "; ".join(issue.message for issue in exc.report.errors[:5])
+        if len(exc.report.errors) > 5:
+            details += f"; 외 {len(exc.report.errors) - 5}개"
+        raise RunError(f"source coverage 검증 실패: {details}") from exc
+
+    coverage_payload = read_json_object(coverage_path, "coverage report")
+    note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
+    if coverage_payload.get("note_mode") != note_mode:
+        raise RunError(
+            "coverage report의 note_mode가 실행 상태와 일치하지 않습니다: "
+            f"{coverage_payload.get('note_mode')} != {note_mode}"
+        )
+    expected_profile = role_execution_policy(note_mode)["final_reviewer"]["agent_profile"]
+    if coverage_payload.get("reviewer_profile") != expected_profile:
+        raise RunError(
+            "coverage report의 reviewer_profile이 최종 검수 실행 계약과 일치하지 않습니다: "
+            f"{coverage_payload.get('reviewer_profile')} != {expected_profile}"
+        )
+    return (
+        {
+            "note_mode": note_mode,
+            "reviewer_profile": expected_profile,
+            "source_map": artifact_record(source_map_path),
+            "coverage_report": artifact_record(coverage_path),
+            "summary": summary,
+        },
+        coverage_path,
+    )
+
+
 def invalidate_downstream(roles: dict[str, dict[str, Any]], changed_role: str) -> None:
     queue = [changed_role]
     seen: set[str] = set()
@@ -487,11 +1084,18 @@ def invalidate_downstream(roles: dict[str, dict[str, Any]], changed_role: str) -
                 continue
             seen.add(name)
             queue.append(name)
-            if entry["active"] and entry["status"] == "passed":
+            if entry["active"]:
                 entry["status"] = "blocked"
                 entry["completed_at"] = None
                 entry["artifacts"] = []
                 entry["failure_reason"] = "선행 역할이 다시 실행되어 기존 통과가 무효화됨"
+                entry["attempts"] = 0
+                entry["repair_scope"] = None
+                entry["repair_packet"] = None
+                entry["active_profile"] = None
+                entry["critical_review_call_id"] = None
+                entry["premium_call_id"] = None
+                entry["coverage_gate"] = None
 
 
 def inventory_changes(
@@ -527,7 +1131,11 @@ def rebuild_roles_after_input_change(
     changes: list[dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
     old_roles = state["roles"]
-    new_roles = make_roles(new_items, state["output_format"])
+    new_roles = make_roles(
+        new_items,
+        state["output_format"],
+        state.get("note_mode", DEFAULT_NOTE_MODE),
+    )
     apply_role_overrides(new_roles, state.get("role_overrides", {}))
 
     changed_kinds: set[str] = set()
@@ -552,11 +1160,67 @@ def rebuild_roles_after_input_change(
     for role in ROLE_ORDER:
         old = old_roles[role]
         new = new_roles[role]
-        new["attempts"] = old.get("attempts", 0)
         if role in affected:
+            new["attempts"] = 0
+            new["repair_scope"] = None
+            new["repair_packet"] = None
+            new["active_profile"] = None
+            new["critical_review_call_id"] = None
+            new["premium_call_id"] = None
+            new["coverage_gate"] = None
+            new["rerun_count"] = old.get("rerun_count", 0)
             if new["active"]:
                 new["failure_reason"] = "입력 변경으로 기존 통과가 무효화됨"
             continue
+        new["attempts"] = old.get("attempts", 0)
+        new["repair_scope"] = old.get("repair_scope")
+        new["repair_packet"] = old.get("repair_packet")
+        new["active_profile"] = old.get("active_profile")
+        new["critical_review_call_id"] = old.get("critical_review_call_id")
+        new["premium_call_id"] = old.get("premium_call_id")
+        new["coverage_gate"] = old.get("coverage_gate")
+        new["rerun_count"] = old.get("rerun_count", 0)
+        if old["active"] == new["active"] and old["dependencies"] == new["dependencies"]:
+            for key in ("status", "started_at", "completed_at", "artifacts", "failure_reason"):
+                new[key] = old.get(key)
+    refresh_statuses(new_roles)
+    return new_roles
+
+
+def rebuild_roles_after_mode_change(
+    state: dict[str, Any],
+    new_mode: str,
+) -> dict[str, dict[str, Any]]:
+    """전사·자료 매핑은 보존하고 집필 이후 역할만 새 제작 모드로 다시 계획한다."""
+
+    old_roles = state["roles"]
+    new_roles = make_roles(state["inputs"], state["output_format"], new_mode)
+    apply_role_overrides(new_roles, state.get("role_overrides", {}))
+    affected = role_descendants(old_roles, {"writer"}) | role_descendants(new_roles, {"writer"})
+
+    for role in ROLE_ORDER:
+        old = old_roles[role]
+        new = new_roles[role]
+        if role in affected:
+            new["attempts"] = 0
+            new["repair_scope"] = None
+            new["repair_packet"] = None
+            new["active_profile"] = None
+            new["critical_review_call_id"] = None
+            new["premium_call_id"] = None
+            new["coverage_gate"] = None
+            new["rerun_count"] = old.get("rerun_count", 0)
+            if new["active"]:
+                new["failure_reason"] = "학습노트 제작 모드 변경으로 기존 집필 이후 통과가 무효화됨"
+            continue
+        new["attempts"] = old.get("attempts", 0)
+        new["repair_scope"] = old.get("repair_scope")
+        new["repair_packet"] = old.get("repair_packet")
+        new["active_profile"] = old.get("active_profile")
+        new["critical_review_call_id"] = old.get("critical_review_call_id")
+        new["premium_call_id"] = old.get("premium_call_id")
+        new["coverage_gate"] = old.get("coverage_gate")
+        new["rerun_count"] = old.get("rerun_count", 0)
         if old["active"] == new["active"] and old["dependencies"] == new["dependencies"]:
             for key in ("status", "started_at", "completed_at", "artifacts", "failure_reason"):
                 new[key] = old.get(key)
@@ -604,6 +1268,9 @@ def locked_init(
         "project_root": str(root),
         "input_root": str(input_root),
         "output_format": args.output_format,
+        "note_mode": args.note_mode,
+        "mode_contract": NOTE_MODE_CONFIG[args.note_mode],
+        "review_cycle": 1,
         "classification_overrides": classification_overrides,
         "role_overrides": {},
         "inputs": items,
@@ -619,7 +1286,10 @@ def locked_init(
             "reuse": "입력 SHA-256이 같으면 검증된 중간 산출물 재사용",
             "source_pointer_required": True,
         },
-        "roles": make_roles(items, args.output_format),
+        "execution_profiles": EXECUTION_PROFILES,
+        "cost_policy": COST_POLICY,
+        "cost_usage": new_cost_usage(),
+        "roles": make_roles(items, args.output_format, args.note_mode),
         "events": [{"at": timestamp, "event": "initialized", "detail": f"입력 {len(items)}개"}],
     }
     write_json(state_file, state)
@@ -629,12 +1299,29 @@ def locked_init(
 
 def command_status(args: argparse.Namespace) -> int:
     state = read_state(args.state.expanduser().resolve())
-    print(f"강의: {state['lecture_id']} | 출력: {state['output_format']} | 입력: {len(state['inputs'])}개")
+    note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
+    mode_label = NOTE_MODE_CONFIG[note_mode]["label"]
+    print(
+        f"강의: {state['lecture_id']} | 제작 모드: {mode_label}({note_mode}) | "
+        f"출력: {state['output_format']} | 입력: {len(state['inputs'])}개"
+    )
+    critical_reviews = state.get("cost_usage", {}).get("critical_reviews", [])
+    print(f"고강도 핵심 재검수: {len(critical_reviews)}/{CRITICAL_REVIEW_LIMIT}회")
+    premium_reviews = state.get("cost_usage", {}).get("premium_final_reviews", [])
+    print(
+        f"완성본 고비용 검수: 누적 {len(premium_reviews)}회 | "
+        f"현재 review cycle {state.get('review_cycle', 1)}"
+    )
+    execution_policy = role_execution_policy(note_mode)
     for role in ROLE_ORDER:
         entry = state["roles"][role]
         active = "활성" if entry["active"] else "비활성"
         deps = ",".join(entry["dependencies"]) or "-"
-        print(f"{role:24} {entry['status']:8} {active:4} 선행={deps}")
+        execution = entry.get("execution", execution_policy[role])
+        print(
+            f"{role:24} {entry['status']:8} {active:4} "
+            f"실행={execution['executor']:8} 선행={deps}"
+        )
     return 0
 
 
@@ -642,6 +1329,8 @@ def command_next(args: argparse.Namespace) -> int:
     state_file = args.state.expanduser().resolve()
     state = read_state(state_file)
     refresh_statuses(state["roles"])
+    note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
+    execution_policy = role_execution_policy(note_mode)
     ready = []
     for role in ROLE_ORDER:
         entry = state["roles"][role]
@@ -652,9 +1341,30 @@ def command_next(args: argparse.Namespace) -> int:
                     "prompt": entry["prompt"],
                     "reason": entry["reason"],
                     "attempts": entry["attempts"],
+                    "max_attempts": entry.get("max_attempts", 2),
+                    "repair_scope": entry.get("repair_scope"),
+                    "repair_packet": entry.get("repair_packet"),
+                    "execution": entry.get("execution", execution_policy[role]),
                 }
             )
-    print(json.dumps({"state": str(state_file), "ready": ready}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "state": str(state_file),
+                "note_mode": note_mode,
+                "mode_contract": NOTE_MODE_CONFIG[note_mode],
+                "execution_profiles": state.get("execution_profiles", EXECUTION_PROFILES),
+                "cost_policy": state.get("cost_policy", COST_POLICY),
+                "cost_usage": state.get(
+                    "cost_usage",
+                    new_cost_usage(),
+                ),
+                "ready": ready,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 
@@ -669,6 +1379,131 @@ def append_event(state: dict[str, Any], event: str, role: str, detail: str | Non
     if detail:
         item["detail"] = detail
     state["events"].append(item)
+
+
+def advance_review_cycle(state: dict[str, Any], reason: str) -> int:
+    """내용·입력·모드 변경 뒤 새 최종 검수 1회를 명시적으로 연다."""
+
+    state["review_cycle"] = int(state.get("review_cycle", 1)) + 1
+    append_event(state, "review_cycle_advanced", "manager", reason)
+    return state["review_cycle"]
+
+
+def final_review_input_fingerprint(state: dict[str, Any]) -> str:
+    """완성본 검수의 실제 의미 입력을 경로와 무관한 SHA-256으로 묶는다."""
+
+    evidence: list[dict[str, Any]] = []
+    for role in ("source_mapper", "layout_builder"):
+        entry = state["roles"][role]
+        if entry.get("status") != "passed" or not entry.get("artifacts"):
+            raise RunError(f"최종 검수 지문을 만들 선행 산출물이 없습니다: {role}")
+        for record in entry["artifacts"]:
+            if not isinstance(record, dict) or not artifact_matches(record):
+                raise RunError(f"최종 검수 선행 산출물이 변경되었거나 누락됐습니다: {role}")
+            evidence.append(
+                {
+                    "role": role,
+                    "kind": record.get("kind"),
+                    "bytes": record.get("bytes"),
+                    "file_count": record.get("file_count"),
+                    "sha256": record.get("sha256"),
+                }
+            )
+    payload = {
+        "note_mode": state.get("note_mode", DEFAULT_NOTE_MODE),
+        "evidence": evidence,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def reserve_premium_final_review(state: dict[str, Any], entry: dict[str, Any]) -> str:
+    """현재 review cycle의 유일한 완성본 검수 호출을 시작 전에 예약한다."""
+
+    note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
+    route = PREMIUM_FINAL_REVIEW_ROUTES[note_mode]
+    cycle = int(state.get("review_cycle", 1))
+    input_fingerprint = final_review_input_fingerprint(state)
+    usage = state.setdefault("cost_usage", new_cost_usage())
+    calls = usage.setdefault("premium_final_reviews", [])
+    matching = [
+        call
+        for call in calls
+        if isinstance(call, dict)
+        and call.get("review_cycle") == cycle
+        and call.get("note_mode") == note_mode
+    ]
+    if len(matching) >= PREMIUM_FINAL_REVIEW_LIMIT:
+        raise RunError(
+            "현재 review cycle의 완성본 고비용 검수 1회를 이미 사용했습니다. "
+            "같은 완성본을 다시 읽히지 말고 기존 검수의 국소 수정안을 적용하십시오."
+        )
+    if any(
+        isinstance(call, dict)
+        and call.get("route") == route["route"]
+        and call.get("input_fingerprint") == input_fingerprint
+        for call in calls
+    ):
+        raise RunError(
+            "동일한 source map과 완성본은 이미 같은 고비용 프로필로 검수했습니다. "
+            "review_cycle만 늘려 같은 완성본을 다시 호출할 수 없습니다."
+        )
+    profile = route["profile"]
+    call_id = f"{route['route']}-cycle-{cycle}"
+    profile_contract = EXECUTION_PROFILES[profile]
+    calls.append(
+        {
+            "call_id": call_id,
+            "review_cycle": cycle,
+            "note_mode": note_mode,
+            "role": "final_reviewer",
+            "route": route["route"],
+            "profile": profile,
+            "model": profile_contract["codex_model"],
+            "reasoning_effort": profile_contract["reasoning_effort"],
+            "attempt_kind": "full_note_audit",
+            "input_fingerprint": input_fingerprint,
+            "status": "running",
+            "started_at": now_iso(),
+            "completed_at": None,
+        }
+    )
+    entry["premium_call_id"] = call_id
+    return profile
+
+
+def finish_premium_final_review(
+    state: dict[str, Any], entry: dict[str, Any], status: str
+) -> None:
+    call_id = entry.get("premium_call_id")
+    if not call_id:
+        raise RunError("최종 검수의 고비용 호출 예약 기록이 없습니다.")
+    calls = state.get("cost_usage", {}).get("premium_final_reviews", [])
+    for call in calls:
+        if isinstance(call, dict) and call.get("call_id") == call_id:
+            if call.get("status") != "running":
+                raise RunError("최종 검수 호출은 running 상태에서만 종료할 수 있습니다.")
+            call["status"] = status
+            call["completed_at"] = now_iso()
+            return
+    raise RunError("최종 검수의 고비용 호출 원장 항목을 찾을 수 없습니다.")
+
+
+def finish_critical_review(state: dict[str, Any], entry: dict[str, Any], status: str) -> None:
+    call_id = entry.get("critical_review_call_id")
+    if not call_id:
+        return
+    calls = state.get("cost_usage", {}).get("critical_reviews", [])
+    for call in calls:
+        if isinstance(call, dict) and call.get("call_id") == call_id:
+            if call.get("status") != "running":
+                raise RunError("국소 고강도 검수 호출은 running 상태에서만 종료할 수 있습니다.")
+            call["status"] = status
+            call["completed_at"] = now_iso()
+            return
+    raise RunError("국소 고강도 검수 호출 원장 항목을 찾을 수 없습니다.")
 
 
 def command_activate(args: argparse.Namespace) -> int:
@@ -696,6 +1531,7 @@ def locked_activate(args: argparse.Namespace, state_file: Path) -> int:
     normalize_dependencies(state["roles"])
     invalidate_downstream(state["roles"], args.role)
     state.setdefault("role_overrides", {})[args.role] = {"mode": "active", "reason": args.reason}
+    advance_review_cycle(state, f"역할 활성화: {args.role}")
     append_event(state, "activated", args.role, args.reason)
     save_state(state_file, state)
     print(f"활성화: {args.role} | {entry['status']}")
@@ -731,9 +1567,14 @@ def locked_deactivate(args: argparse.Namespace, state_file: Path) -> int:
     entry["started_at"] = None
     entry["completed_at"] = None
     entry["artifacts"] = []
+    entry["active_profile"] = None
+    entry["critical_review_call_id"] = None
+    entry["premium_call_id"] = None
+    entry["coverage_gate"] = None
     entry["failure_reason"] = None
     normalize_dependencies(state["roles"])
     state.setdefault("role_overrides", {})[args.role] = {"mode": "inactive", "reason": args.reason}
+    advance_review_cycle(state, f"역할 비활성화: {args.role}")
     append_event(state, "deactivated", args.role, args.reason)
     save_state(state_file, state)
     print(f"비활성화: {args.role} | {args.reason}")
@@ -778,6 +1619,7 @@ def locked_refresh_inputs(args: argparse.Namespace, state_file: Path) -> int:
         "code_files": sum(item["kind"] == "code" for item in new_items),
     }
     detail = ", ".join(change["path"] for change in changes)
+    advance_review_cycle(state, f"입력 변경 {len(changes)}개")
     append_event(state, "inputs_refreshed", "manager", detail)
     save_state(state_file, state)
     print(f"입력 갱신: 변경 {len(changes)}개 | 영향 단계만 재실행")
@@ -797,6 +1639,19 @@ def command_rerun(args: argparse.Namespace) -> int:
         ]
         if running:
             raise RunError(f"실행 중 역할이 있어 재실행을 예약할 수 없습니다: {', '.join(running)}")
+        failed = [
+            role for role, candidate in state["roles"].items() if candidate["status"] == "failed"
+        ]
+        if failed:
+            raise RunError(
+                "실패 복구에는 rerun을 사용할 수 없습니다. 실패한 범위의 국소 수정으로 "
+                f"처리하거나 사용자에게 중단 상태를 보고하십시오: {', '.join(failed)}"
+            )
+        if args.role == "final_reviewer":
+            raise RunError(
+                "final_reviewer만 직접 재실행할 수 없습니다. 실제로 바뀐 입력·집필·조판 역할을 "
+                "재실행하면 새 review cycle에서 변경된 완성본만 검수합니다."
+            )
 
         entry = get_role(state, args.role)
         if not entry["active"]:
@@ -810,10 +1665,163 @@ def command_rerun(args: argparse.Namespace) -> int:
         entry["completed_at"] = None
         entry["artifacts"] = []
         entry["failure_reason"] = args.reason
+        entry["attempts"] = 0
+        entry["repair_scope"] = None
+        entry["repair_packet"] = None
+        entry["active_profile"] = None
+        entry["critical_review_call_id"] = None
+        entry["premium_call_id"] = None
+        entry["coverage_gate"] = None
+        entry["rerun_count"] = entry.get("rerun_count", 0) + 1
         refresh_statuses(state["roles"])
-        append_event(state, "rerun_requested", args.role, args.reason)
+        advance_review_cycle(state, f"선택 재실행: {args.role} ({args.change_kind})")
+        append_event(
+            state,
+            "rerun_requested",
+            args.role,
+            f"{args.change_kind}: {args.reason}",
+        )
         save_state(state_file, state)
-        print(f"재실행 예약: {args.role} | {entry['status']} | {args.reason}")
+        print(
+            f"재실행 예약: {args.role} | {entry['status']} | "
+            f"변경={args.change_kind} | {args.reason}"
+        )
+        return 0
+
+
+def command_set_mode(args: argparse.Namespace) -> int:
+    """입력과 검증된 매핑은 유지하면서 학습노트 제작 모드를 바꾼다."""
+
+    state_file = args.state.expanduser().resolve()
+    with state_write_lock(state_file):
+        state = read_state(state_file)
+        running = [
+            role for role, entry in state["roles"].items() if entry["status"] == "running"
+        ]
+        if running:
+            raise RunError(f"실행 중 역할이 있어 제작 모드를 바꿀 수 없습니다: {', '.join(running)}")
+
+        old_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
+        if old_mode == args.note_mode:
+            print(
+                f"제작 모드 변경 없음: {NOTE_MODE_CONFIG[old_mode]['label']}({old_mode})"
+            )
+            return 0
+
+        state["roles"] = rebuild_roles_after_mode_change(state, args.note_mode)
+        state["note_mode"] = args.note_mode
+        state["mode_contract"] = NOTE_MODE_CONFIG[args.note_mode]
+        detail = (
+            f"{NOTE_MODE_CONFIG[old_mode]['label']}({old_mode}) -> "
+            f"{NOTE_MODE_CONFIG[args.note_mode]['label']}({args.note_mode}) | {args.reason}"
+        )
+        advance_review_cycle(state, f"제작 모드 변경: {old_mode} -> {args.note_mode}")
+        append_event(state, "note_mode_changed", "writer", detail)
+        save_state(state_file, state)
+        print(f"제작 모드 변경: {detail} | 집필 이후만 재실행")
+        return 0
+
+
+def command_escalate(args: argparse.Namespace) -> int:
+    """작고 중요한 미해결 패킷 하나의 고강도 검수 호출을 예약·시작한다."""
+
+    state_file = args.state.expanduser().resolve()
+    with state_write_lock(state_file):
+        state = read_state(state_file)
+        entry = get_role(state, args.role)
+        note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
+        allowed_categories = ESCALATION_RULES.get(note_mode, {}).get(args.role)
+        if not allowed_categories:
+            raise RunError(f"{note_mode} 모드에서 국소 고강도 승격을 지원하지 않는 역할입니다: {args.role}")
+        if args.category not in allowed_categories:
+            allowed = ", ".join(sorted(allowed_categories))
+            raise RunError(
+                f"{note_mode}/{args.role}에 허용되지 않은 승격 분류입니다: {args.category} "
+                f"(허용: {allowed})"
+            )
+        execution = entry.get("execution", role_execution_policy(note_mode)[args.role])
+        escalation_profile = execution.get("escalation_profile")
+        if escalation_profile not in COST_POLICY["targeted_escalation_profiles"]:
+            raise RunError(f"국소 고강도 승격을 지원하지 않는 역할입니다: {args.role}")
+        if entry["status"] not in {"running", "failed"}:
+            raise RunError(
+                f"첫 의미 검수에서 미해결 항목이 생긴 running/failed 역할만 승격할 수 있습니다: "
+                f"{args.role}={entry['status']}"
+            )
+        if entry.get("attempts", 0) != 1:
+            raise RunError("고강도 승격은 첫 의미 작업 뒤의 유일한 국소 재검수로만 사용할 수 있습니다.")
+        unmet = [
+            dep for dep in entry["dependencies"] if state["roles"][dep]["status"] != "passed"
+        ]
+        if unmet:
+            raise RunError(f"선행 역할이 통과하지 않았습니다: {', '.join(unmet)}")
+
+        usage = state.setdefault(
+            "cost_usage",
+            new_cost_usage(),
+        )
+        reviews = usage.setdefault("critical_reviews", [])
+        limit = int(usage.get("critical_review_limit", CRITICAL_REVIEW_LIMIT))
+        if limit != CRITICAL_REVIEW_LIMIT:
+            raise RunError("실행 상태의 고강도 국소 재검수 제한값이 프로젝트 정책과 일치하지 않습니다.")
+        if len(reviews) >= limit:
+            raise RunError("이 강의의 고강도 국소 재검수 1회를 이미 사용했습니다.")
+
+        reason = args.reason.strip()
+        if not reason or len(reason) > MAX_REPAIR_SCOPE_CHARS or "\n" in reason or "\r" in reason:
+            raise RunError(f"승격 이유는 한 줄 {MAX_REPAIR_SCOPE_CHARS}자 이하여야 합니다.")
+        packet_path, packet_record = resolve_model_packet(args.packet, state_file)
+        profile_contract = EXECUTION_PROFILES[escalation_profile]
+        call_id = f"critical-review-{len(reviews) + 1}"
+        started_at = now_iso()
+        review = {
+            "call_id": call_id,
+            "requested_at": started_at,
+            "started_at": started_at,
+            "completed_at": None,
+            "status": "running",
+            "attempt_kind": "targeted_escalation",
+            "role": args.role,
+            "category": args.category,
+            "reason": reason,
+            "profile": escalation_profile,
+            "note_mode": note_mode,
+            "model": profile_contract["codex_model"],
+            "reasoning_effort": profile_contract["reasoning_effort"],
+            "review_cycle": state.get("review_cycle", 1),
+            "packet": packet_record,
+        }
+        reviews.append(review)
+        entry["status"] = "running"
+        entry["active_profile"] = escalation_profile
+        entry["critical_review_call_id"] = call_id
+        entry["repair_scope"] = f"{args.category}: {reason}"
+        entry["repair_packet"] = packet_record
+        entry["started_at"] = started_at
+        entry["completed_at"] = None
+        entry["failure_reason"] = None
+        append_event(
+            state,
+            "critical_review_requested",
+            args.role,
+            f"{args.category}: {reason} | {packet_path.name}",
+        )
+        save_state(state_file, state)
+        print(
+            json.dumps(
+                {
+                    "state": str(state_file),
+                    "role": args.role,
+                    "call_id": call_id,
+                    "category": args.category,
+                    "packet": packet_record,
+                    "execution": profile_contract,
+                    "remaining_critical_reviews": limit - len(reviews),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0
 
 
@@ -829,20 +1837,64 @@ def locked_start(args: argparse.Namespace, state_file: Path) -> int:
     entry = get_role(state, args.role)
     if entry["status"] not in {"ready", "failed"}:
         raise RunError(f"시작할 수 없는 상태입니다: {args.role}={entry['status']}")
+    if entry.get("attempts", 0) >= entry.get("max_attempts", 2):
+        raise RunError(
+            f"역할 재검수 한도를 초과했습니다: {args.role}. "
+            "전체 역할을 다시 호출하지 말고 미해결로 보고하거나 입력 변경을 확인하십시오."
+        )
+    note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
+    execution = entry.get("execution", role_execution_policy(note_mode)[args.role])
+    active_profile = execution.get("agent_profile") or execution.get("primary_profile")
     if entry["status"] == "failed":
         unmet = [dep for dep in entry["dependencies"] if state["roles"][dep]["status"] != "passed"]
         if unmet:
             raise RunError(f"선행 역할이 통과하지 않았습니다: {', '.join(unmet)}")
+        repair_scope = (args.repair_scope or "").strip()
+        if not repair_scope:
+            raise RunError(
+                "실패 역할의 재시작에는 --repair-scope로 고칠 페이지·절·전사 구간을 제한해야 합니다."
+            )
+        if len(repair_scope) > MAX_REPAIR_SCOPE_CHARS or "\n" in repair_scope or "\r" in repair_scope:
+            raise RunError(f"repair-scope는 한 줄 {MAX_REPAIR_SCOPE_CHARS}자 이하여야 합니다.")
+        if re.search(r"전체\s*(강의|전사|교안|자료|역할)|full\s+(lecture|transcript|handout|role)", repair_scope, re.IGNORECASE):
+            raise RunError("repair-scope에 전체 강의·전사·교안·역할을 지정할 수 없습니다.")
+
+        critical_reviews = state.get("cost_usage", {}).get("critical_reviews", [])
+        if any(review.get("role") == args.role for review in critical_reviews if isinstance(review, dict)):
+            raise RunError("이 역할은 고강도 국소 재검수를 이미 사용해 추가 repair를 실행할 수 없습니다.")
+
+        executor = execution.get("executor")
+        if executor in {"subagent", "hybrid"}:
+            if not args.repair_packet:
+                raise RunError(
+                    "의미 역할의 국소 재검수에는 16KiB 이하의 --repair-packet JSON이 필요합니다."
+                )
+            _packet_path, packet_record = resolve_model_packet(args.repair_packet, state_file)
+            entry["repair_packet"] = packet_record
+        elif args.repair_packet:
+            raise RunError("Python 전용 역할에는 모델 입력용 --repair-packet을 전달하지 않습니다.")
+        entry["repair_scope"] = repair_scope
+        active_profile = execution.get("repair_profile") or active_profile
+    elif args.repair_scope or args.repair_packet:
+        raise RunError("첫 실행에는 --repair-scope나 --repair-packet을 사용하지 않습니다.")
+    if args.role == "final_reviewer":
+        active_profile = reserve_premium_final_review(state, entry)
     invalidate_downstream(state["roles"], args.role)
     entry["status"] = "running"
     entry["attempts"] += 1
     entry["started_at"] = now_iso()
     entry["completed_at"] = None
     entry["artifacts"] = []
+    entry["active_profile"] = active_profile
+    entry["coverage_gate"] = None
     entry["failure_reason"] = None
-    append_event(state, "started", args.role)
+    detail_parts = [f"profile={active_profile}"]
+    if entry.get("repair_scope"):
+        detail_parts.append(f"국소 재검수: {entry['repair_scope']}")
+    detail = " | ".join(detail_parts)
+    append_event(state, "started", args.role, detail)
     save_state(state_file, state)
-    print(f"시작: {args.role} | 시도 {entry['attempts']}회")
+    print(f"시작: {args.role} | 시도 {entry['attempts']}회 | 프로필 {active_profile}")
     return 0
 
 
@@ -857,10 +1909,25 @@ def locked_complete(args: argparse.Namespace, state_file: Path) -> int:
     entry = get_role(state, args.role)
     if entry["status"] != "running":
         raise RunError(f"실행 중인 역할만 완료할 수 있습니다: {args.role}={entry['status']}")
+    if args.role != "final_reviewer" and (args.source_map or args.coverage_report):
+        raise RunError("--source-map과 --coverage-report는 final_reviewer 완료에만 사용합니다.")
     artifacts = [resolve_artifact(raw, state_file) for raw in args.artifact]
+    coverage_gate = None
+    if args.role == "final_reviewer":
+        coverage_gate, coverage_path = build_coverage_gate(
+            state,
+            state_file,
+            args.source_map,
+            args.coverage_report,
+        )
+        if coverage_path not in artifacts:
+            artifacts.append(coverage_path)
+        finish_premium_final_review(state, entry, "passed")
+    finish_critical_review(state, entry, "passed")
     entry["status"] = "passed"
     entry["completed_at"] = now_iso()
     entry["artifacts"] = [artifact_record(path) for path in artifacts]
+    entry["coverage_gate"] = coverage_gate
     entry["failure_reason"] = None
     append_event(state, "passed", args.role, f"산출물 {len(artifacts)}개")
     save_state(state_file, state)
@@ -879,6 +1946,9 @@ def locked_fail(args: argparse.Namespace, state_file: Path) -> int:
     entry = get_role(state, args.role)
     if entry["status"] != "running":
         raise RunError(f"실행 중인 역할만 실패 처리할 수 있습니다: {args.role}={entry['status']}")
+    if args.role == "final_reviewer":
+        finish_premium_final_review(state, entry, "failed")
+    finish_critical_review(state, entry, "failed")
     entry["status"] = "failed"
     entry["failure_reason"] = args.reason
     entry["completed_at"] = now_iso()
@@ -909,6 +1979,96 @@ def changed_inputs(state: dict[str, Any]) -> list[str]:
     return changed
 
 
+def verify_coverage_gate(state: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    final_entry = state["roles"]["final_reviewer"]
+    if final_entry.get("status") != "passed":
+        return errors
+    gate = final_entry.get("coverage_gate")
+    if not isinstance(gate, dict):
+        return ["최종 검수의 source coverage 게이트 기록이 없음"]
+    source_record = gate.get("source_map")
+    coverage_record = gate.get("coverage_report")
+    if not isinstance(source_record, dict) or not artifact_matches(source_record):
+        errors.append("최종 검수 source map이 변경되었거나 누락됨")
+    if not isinstance(coverage_record, dict) or not artifact_matches(coverage_record):
+        errors.append("최종 검수 coverage report가 변경되었거나 누락됨")
+    if errors:
+        return errors
+
+    source_path = Path(source_record["path"])
+    coverage_path = Path(coverage_record["path"])
+    if not artifact_was_recorded(state["roles"]["source_mapper"].get("artifacts", []), source_path):
+        errors.append("최종 검수 source map이 source_mapper의 기록된 산출물이 아님")
+    try:
+        _source_ids, summary = validate_coverage(source_path, coverage_path)
+    except CoverageValidationError as exc:
+        errors.extend(f"source coverage: {issue.message}" for issue in exc.report.errors)
+        return errors
+
+    payload = read_json_object(coverage_path, "coverage report")
+    note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
+    expected_profile = role_execution_policy(note_mode)["final_reviewer"]["agent_profile"]
+    if gate.get("note_mode") != note_mode or payload.get("note_mode") != note_mode:
+        errors.append("최종 검수 coverage report의 note_mode가 실행 상태와 다름")
+    if (
+        gate.get("reviewer_profile") != expected_profile
+        or payload.get("reviewer_profile") != expected_profile
+    ):
+        errors.append("최종 검수 coverage report의 reviewer_profile이 실행 계약과 다름")
+    if gate.get("summary") != summary:
+        errors.append("최종 검수 coverage 집계가 기록 후 변경됨")
+    return errors
+
+
+def verify_premium_final_reviews(state: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    calls = state.get("cost_usage", {}).get("premium_final_reviews", [])
+    call_by_id = {
+        call.get("call_id"): call
+        for call in calls
+        if isinstance(call, dict) and isinstance(call.get("call_id"), str)
+    }
+    if len(call_by_id) != len(calls):
+        errors.append("완성본 고비용 검수 call_id가 없거나 중복됨")
+    for call in calls:
+        if not isinstance(call, dict):
+            continue
+        mode = call.get("note_mode")
+        route = PREMIUM_FINAL_REVIEW_ROUTES.get(mode)
+        if route is None:
+            continue
+        profile = EXECUTION_PROFILES[route["profile"]]
+        if (
+            call.get("model") != profile["codex_model"]
+            or call.get("reasoning_effort") != profile["reasoning_effort"]
+            or call.get("attempt_kind") != "full_note_audit"
+        ):
+            errors.append(f"완성본 고비용 검수 실행 계약이 변조됨: {call.get('call_id')}")
+
+    final_entry = state["roles"]["final_reviewer"]
+    if final_entry.get("status") in {"running", "passed", "failed"}:
+        call_id = final_entry.get("premium_call_id")
+        call = call_by_id.get(call_id)
+        if call is None:
+            errors.append("최종 검수 역할과 연결된 고비용 호출 기록이 없음")
+        else:
+            if call.get("status") != final_entry.get("status"):
+                errors.append("최종 검수 역할 상태와 고비용 호출 상태가 다름")
+            if call.get("review_cycle") != state.get("review_cycle"):
+                errors.append("최종 검수가 현재 review cycle의 호출과 연결되지 않음")
+            if call.get("note_mode") != state.get("note_mode"):
+                errors.append("최종 검수 호출의 제작 모드가 현재 상태와 다름")
+            try:
+                current_fingerprint = final_review_input_fingerprint(state)
+            except RunError as exc:
+                errors.append(str(exc))
+            else:
+                if call.get("input_fingerprint") != current_fingerprint:
+                    errors.append("최종 검수 호출 이후 source map 또는 완성본이 바뀜")
+    return errors
+
+
 def verify_state(state: dict[str, Any], check_inputs: bool) -> list[str]:
     errors: list[str] = []
     roles = state["roles"]
@@ -927,8 +2087,39 @@ def verify_state(state: dict[str, Any], check_inputs: bool) -> list[str]:
             for dep in entry["dependencies"]:
                 if roles[dep]["status"] != "passed":
                     errors.append(f"선행 역할 미통과 상태에서 통과됨: {role} <- {dep}")
+        repair_packet = entry.get("repair_packet")
+        if repair_packet is not None and not artifact_matches(repair_packet):
+            errors.append(f"국소 재검수 패킷이 변경되었거나 누락됨: {role}")
     if check_inputs:
         errors.extend(changed_inputs(state))
+    errors.extend(verify_coverage_gate(state))
+    errors.extend(verify_premium_final_reviews(state))
+    critical_reviews = state.get("cost_usage", {}).get("critical_reviews", [])
+    if len(critical_reviews) > CRITICAL_REVIEW_LIMIT:
+        errors.append("고강도 국소 재검수 기록이 허용 한도를 초과함")
+    critical_by_id: dict[str, dict[str, Any]] = {}
+    for review in critical_reviews:
+        packet = review.get("packet") if isinstance(review, dict) else None
+        if not isinstance(packet, dict) or not artifact_matches(packet):
+            errors.append("고강도 국소 재검수 패킷이 변경되었거나 누락됨")
+        if isinstance(review, dict) and isinstance(review.get("call_id"), str):
+            critical_by_id[review["call_id"]] = review
+    for role, entry in roles.items():
+        call_id = entry.get("critical_review_call_id")
+        if not call_id:
+            continue
+        call = critical_by_id.get(call_id)
+        if call is None:
+            errors.append(f"역할과 연결된 고강도 국소 재검수 호출이 없음: {role}")
+            continue
+        if call.get("role") != role or call.get("status") != entry.get("status"):
+            errors.append(f"역할과 고강도 국소 재검수 호출 상태가 다름: {role}")
+    linked_ids = {
+        entry.get("critical_review_call_id") for entry in roles.values() if entry.get("critical_review_call_id")
+    }
+    for call_id, call in critical_by_id.items():
+        if call.get("status") == "running" and call_id not in linked_ids:
+            errors.append("실행 중인 고강도 국소 재검수 호출이 역할과 연결되지 않음")
     return errors
 
 
@@ -958,6 +2149,12 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("input_dir", type=Path)
     init_parser.add_argument("--lecture-id", required=True)
     init_parser.add_argument("--output-format", choices=("md", "pdf", "docx"), default="pdf")
+    init_parser.add_argument(
+        "--note-mode",
+        choices=NOTE_MODES,
+        default=DEFAULT_NOTE_MODE,
+        help="학습노트 제작 모드: faithful=자료 충실형(기본), deep=심화 이해형",
+    )
     init_parser.add_argument("--root", type=Path, default=default_root)
     init_parser.add_argument(
         "--classify",
@@ -1010,17 +2207,58 @@ def build_parser() -> argparse.ArgumentParser:
     rerun_parser.add_argument("state", type=Path)
     rerun_parser.add_argument("--role", required=True, choices=ROLE_ORDER)
     rerun_parser.add_argument("--reason", required=True)
+    rerun_parser.add_argument(
+        "--change-kind",
+        required=True,
+        choices=("user_request", "output_contract"),
+        help="실패 재시도가 아니라 새 사용자 요청 또는 출력 계약 변경임을 기록합니다.",
+    )
     rerun_parser.set_defaults(func=command_rerun)
+
+    mode_parser = subparsers.add_parser(
+        "set-mode", help="입력과 자료 매핑은 유지하고 학습노트 제작 모드를 변경합니다."
+    )
+    mode_parser.add_argument("state", type=Path)
+    mode_parser.add_argument("--note-mode", required=True, choices=NOTE_MODES)
+    mode_parser.add_argument("--reason", required=True)
+    mode_parser.set_defaults(func=command_set_mode)
+
+    escalation_parser = subparsers.add_parser(
+        "escalate",
+        help="작고 중요한 JSON 패킷 하나의 모드별 고강도 검수 호출을 한 번만 예약·시작합니다.",
+    )
+    escalation_parser.add_argument("state", type=Path)
+    escalation_parser.add_argument("--role", required=True, choices=ROLE_ORDER)
+    escalation_parser.add_argument("--packet", required=True)
+    escalation_parser.add_argument("--category", required=True, choices=CRITICAL_REVIEW_CATEGORIES)
+    escalation_parser.add_argument("--reason", required=True)
+    escalation_parser.set_defaults(func=command_escalate)
 
     start_parser = subparsers.add_parser("start", help="준비된 역할의 실제 실행을 기록합니다.")
     start_parser.add_argument("state", type=Path)
     start_parser.add_argument("--role", required=True, choices=ROLE_ORDER)
+    start_parser.add_argument(
+        "--repair-scope",
+        help="실패 역할 재시작 시 다시 처리할 페이지·절·전사 구간. 전체 역할 재시도를 금지합니다.",
+    )
+    start_parser.add_argument(
+        "--repair-packet",
+        help="의미 역할 국소 재검수용 model_input=true JSON(최대 16KiB)",
+    )
     start_parser.set_defaults(func=command_start)
 
     complete_parser = subparsers.add_parser("complete", help="실행 중 역할을 산출물과 함께 통과 처리합니다.")
     complete_parser.add_argument("state", type=Path)
     complete_parser.add_argument("--role", required=True, choices=ROLE_ORDER)
     complete_parser.add_argument("--artifact", action="append", required=True)
+    complete_parser.add_argument(
+        "--source-map",
+        help="final_reviewer가 대조한 source_mapper의 study_note_source_map JSON",
+    )
+    complete_parser.add_argument(
+        "--coverage-report",
+        help="final_reviewer가 만든 study_note_source_coverage JSON",
+    )
     complete_parser.set_defaults(func=command_complete)
 
     fail_parser = subparsers.add_parser("fail", help="실행 중 역할의 실패 이유를 기록합니다.")

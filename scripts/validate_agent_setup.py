@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import sys
+import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib.parse import unquote
@@ -40,6 +41,7 @@ RULE_FILES = (
     "workflow.md",
     "orchestration.md",
     "transcription-workflow.md",
+    "note-production-modes.md",
     "content-modes.md",
     "output-and-layout.md",
     "review-checklists.md",
@@ -228,6 +230,61 @@ def validate_packaging(root: Path, report: Report) -> None:
         if text is not None and f"${PACKAGE_NAME}" not in text:
             report.add("error", "packaging-drift", f"openai.yaml에 ${PACKAGE_NAME} 호출 토큰이 없습니다.", openai_yaml)
 
+    codex_config = root / ".codex" / "config.toml"
+    codex_workers = {
+        "study-note-worker.toml": ("gpt-5.6-luna", "high"),
+        "faithful-note-reviewer.toml": ("gpt-5.6-luna", "max"),
+        "quality-note-worker.toml": ("gpt-5.6-sol", "high"),
+        "deep-note-reviewer.toml": ("gpt-5.6-sol", "xhigh"),
+    }
+    if not codex_config.is_file():
+        report.add("error", "missing-packaging", "프로젝트 범위 Codex 하위 에이전트 설정이 없습니다.", codex_config)
+    else:
+        try:
+            config_payload = tomllib.loads(codex_config.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            report.add("error", "invalid-packaging", f"Codex 설정 TOML을 읽을 수 없습니다: {exc}", codex_config)
+        else:
+            agents = config_payload.get("agents", {})
+            if agents.get("default_subagent_model") != "gpt-5.6-luna":
+                report.add("error", "cost-routing-drift", "기본 Codex 하위 모델이 gpt-5.6-luna가 아닙니다.", codex_config)
+            if agents.get("default_subagent_reasoning_effort") != "high":
+                report.add("error", "cost-routing-drift", "기본 Codex 하위 추론 강도가 high가 아닙니다.", codex_config)
+            concurrency = agents.get("max_concurrent_threads_per_session")
+            if not isinstance(concurrency, int) or isinstance(concurrency, bool) or not 1 <= concurrency <= 2:
+                report.add("error", "cost-routing-drift", "동시 하위 에이전트 수는 1~2여야 합니다.", codex_config)
+
+    codex_agent_dir = root / ".codex" / "agents"
+    for path in codex_agent_dir.glob("*.toml") if codex_agent_dir.is_dir() else ():
+        text = read_utf8(path, report)
+        if text is not None and "gpt-5.6-terra" in text:
+            report.add(
+                "error",
+                "cost-routing-drift",
+                "Terra는 이 프로젝트의 실행 프로필에서 사용하지 않습니다.",
+                path,
+            )
+    for filename, (expected_model, expected_effort) in codex_workers.items():
+        path = codex_agent_dir / filename
+        if not path.is_file():
+            report.add("error", "missing-packaging", "Codex 역할 프로필이 없습니다.", path)
+            continue
+        try:
+            payload = tomllib.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            report.add("error", "invalid-packaging", f"Codex 역할 TOML을 읽을 수 없습니다: {exc}", path)
+            continue
+        for field in ("name", "description", "developer_instructions"):
+            if not isinstance(payload.get(field), str) or not payload[field].strip():
+                report.add("error", "invalid-packaging", f"Codex 역할에 {field}가 없습니다.", path)
+        if payload.get("model") != expected_model or payload.get("model_reasoning_effort") != expected_effort:
+            report.add(
+                "error",
+                "cost-routing-drift",
+                f"Codex 역할 모델은 {expected_model}/{expected_effort}여야 합니다.",
+                path,
+            )
+
 
 def validate(root: Path) -> Report:
     report = Report()
@@ -297,10 +354,18 @@ def validate(root: Path) -> Report:
         "test_record_lecture.py",
         "test_transcribe_lecture.py",
         "test_transcribe_batch.py",
+        "test_prepare_transcript_review.py",
+        "test_select_review_packets.py",
+        "test_apply_transcript_corrections.py",
+        "test_validate_source_coverage.py",
         "project_types.py",
         "record_lecture.py",
         "transcribe_lecture.py",
         "transcribe_batch.py",
+        "prepare_transcript_review.py",
+        "select_review_packets.py",
+        "apply_transcript_corrections.py",
+        "validate_source_coverage.py",
         "validate_transcript_package.py",
         "validate_note_output.py",
     ):

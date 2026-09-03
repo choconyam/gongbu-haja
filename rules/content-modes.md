@@ -2,6 +2,8 @@
 
 Select only the sections relevant to the current material. Mixed courses may combine modes within one note.
 
+These subject/content modes are separate from the user-selected production mode in `note-production-modes.md`. Apply the relevant subject guidance within the limits of `faithful` or `deep`; for example, `faithful` verifies a printed derivation without adding a new one, while `deep` may restore verified intermediate steps.
+
 ## Mode Selection Guide
 
 Route by what the sources actually contain, not by course title or file extension. Apply every mode that matches; most real courses need two or more.
