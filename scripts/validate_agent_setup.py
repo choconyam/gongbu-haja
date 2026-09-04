@@ -228,6 +228,33 @@ def validate_packaging(root: Path, report: Report) -> None:
         if required_text not in path.read_text(encoding="utf-8-sig"):
             report.add("error", "packaging-drift", f"매니페스트에 {required_text}가 없습니다.", path)
 
+    # 패키지 버전은 gongbu_haja/__init__.py 한 곳이 기준이다. 플러그인·스킬 메타데이터가
+    # 다른 버전을 말하면 설치 채널마다 다른 버전이 배포되므로 오류로 잡는다.
+    version_source = root / "gongbu_haja" / "__init__.py"
+    version_match = re.search(r'^__version__ = "([^"]+)"', version_source.read_text(encoding="utf-8"), re.MULTILINE) if version_source.is_file() else None
+    if version_match is None:
+        report.add("error", "missing-packaging", "gongbu_haja/__init__.py 에 __version__ 이 없습니다.", version_source)
+    else:
+        package_version = version_match.group(1)
+        for relative, pattern in (
+            (".claude-plugin/plugin.json", r'"version":\s*"([^"]+)"'),
+            ("SKILL.md", r'^\s*version:\s*"([^"]+)"'),
+        ):
+            path = root / Path(relative)
+            if not path.is_file():
+                continue
+            found = re.search(pattern, path.read_text(encoding="utf-8-sig"), re.MULTILINE)
+            if found is None or found.group(1) != package_version:
+                report.add(
+                    "error",
+                    "version-drift",
+                    f"버전이 gongbu_haja/__init__.py({package_version})와 다릅니다: {found.group(1) if found else '없음'}",
+                    path,
+                )
+        pyproject = root / "pyproject.toml"
+        if pyproject.is_file() and 'name = "gongbu-haja"' not in pyproject.read_text(encoding="utf-8"):
+            report.add("error", "packaging-drift", "pyproject.toml 의 name 이 gongbu-haja 가 아닙니다.", pyproject)
+
     openai_yaml = root / "agents" / "openai.yaml"
     if not openai_yaml.is_file():
         report.add("error", "missing-packaging", "Codex 등록 파일(agents/openai.yaml)이 없습니다.", openai_yaml)
@@ -335,6 +362,7 @@ def validate(root: Path) -> Report:
         "test_validate_source_coverage.py",
         "test_execution_profiles.py",
         "test_sync_runtime_agents.py",
+        "test_gongbu_cli.py",
         "execution_profiles.py",
         "sync_runtime_agents.py",
         "project_types.py",
@@ -361,6 +389,10 @@ def validate(root: Path) -> Report:
         ".gitattributes",
         "requirements-recording.txt",
         "requirements-transcription.txt",
+        "pyproject.toml",
+        "gongbu_haja/__init__.py",
+        "gongbu_haja/cli.py",
+        "gongbu_haja/paths.py",
         "강의녹음.bat",
         "강의전사.bat",
         "배치전사.bat",

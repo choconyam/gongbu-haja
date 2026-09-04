@@ -8,6 +8,7 @@ venv/
 # 사용자 강의 원본과 실행 산출물은 저장소에 올리지 않는다.
 input/
 workspace/*
+.gongbu/
 !workspace/README.md
 tmp/
 output/

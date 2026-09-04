@@ -55,6 +55,9 @@ if hasattr(sys.stderr, "reconfigure"):
 # -----------------------------------------------------------------------------
 
 SCHEMA_VERSION = 3
+# 이 스크립트가 속한 엔진 사본의 루트. 저장소를 열었으면 저장소 루트, pipx 설치본이면
+# gongbu_haja/engine/ 이다. 역할 프롬프트·규칙은 여기서 상대 경로로 찾는다.
+ENGINE_ROOT = Path(__file__).resolve().parent.parent
 LEGACY_SCHEMA_VERSIONS = {1, 2}
 DEFAULT_NOTE_MODE = "faithful"
 NOTE_MODE_CONFIG = {
@@ -442,10 +445,27 @@ def parse_classification_overrides(
     return overrides
 
 
+# 과목 폴더를 통째로 입력으로 쓰면 우리가 만든 상태(.gongbu/)·최종 노트(output/)와
+# 숨김 파일이 입력으로 되돌아와 해시가 계속 바뀐다. 입력 목록에서 제외한다.
+IGNORED_INPUT_DIR_NAMES = frozenset({".gongbu", "output", "workspace", "__pycache__"})
+
+
+def iter_input_files(input_root: Path) -> list[Path]:
+    files: list[Path] = []
+    for path in input_root.rglob("*"):
+        if not path.is_file():
+            continue
+        parts = path.relative_to(input_root).parts
+        if any(part in IGNORED_INPUT_DIR_NAMES or part.startswith(".") for part in parts):
+            continue
+        files.append(path)
+    return sorted(files, key=lambda p: p.as_posix().lower())
+
+
 def inventory(input_root: Path, overrides: dict[str, str] | None = None) -> list[dict[str, Any]]:
     if not input_root.exists() or not input_root.is_dir():
         raise RunError(f"입력 폴더가 없습니다: {input_root}")
-    files = sorted((path for path in input_root.rglob("*") if path.is_file()), key=lambda p: p.as_posix().lower())
+    files = iter_input_files(input_root)
     if not files:
         raise RunError(f"입력 폴더가 비어 있습니다: {input_root}")
     result: list[dict[str, Any]] = []
@@ -1263,7 +1283,11 @@ def command_init(args: argparse.Namespace) -> int:
     input_root = args.input_dir.expanduser().resolve()
     if not LECTURE_ID_RE.fullmatch(args.lecture_id) or args.lecture_id in {".", ".."}:
         raise RunError("lecture_id에 파일 경로용 특수문자나 끝의 점·공백을 사용할 수 없습니다.")
-    state_file = state_path_for(root, args.lecture_id)
+    state_root = getattr(args, "state_root", None)
+    if state_root is not None:
+        state_file = state_root.expanduser().resolve() / args.lecture_id / "run_state.json"
+    else:
+        state_file = state_path_for(root, args.lecture_id)
     if state_file.exists():
         raise RunError(f"이미 실행 상태가 있습니다. 덮어쓰지 않았습니다: {state_file}")
     # 입력 검증과 해시 계산은 락·폴더 생성 전에 끝내, 실패한 init이
@@ -1299,6 +1323,8 @@ def locked_init(
         "updated_at": timestamp,
         "project_root": str(root),
         "input_root": str(input_root),
+        "state_root": str(state_file.parent.parent),
+        "engine_root": str(ENGINE_ROOT),
         "output_format": args.output_format,
         "note_mode": args.note_mode,
         "mode_contract": NOTE_MODE_CONFIG[args.note_mode],
@@ -1391,6 +1417,9 @@ def command_next(args: argparse.Namespace) -> int:
         json.dumps(
             {
                 "state": str(state_file),
+                # 관리자가 역할 프롬프트·규칙을 읽을 실제 위치(설치본이면 패키지 안 engine/).
+                "engine_root": str(ENGINE_ROOT),
+                "prompt_root": str(ENGINE_ROOT / "agent_prompts"),
                 "note_mode": note_mode,
                 "mode_contract": NOTE_MODE_CONFIG[note_mode],
                 "runtime": state.get("runtime"),
@@ -2018,7 +2047,7 @@ def changed_inputs(state: dict[str, Any]) -> list[str]:
     input_root = Path(state["input_root"])
     changed: list[str] = []
     recorded = {item["path"]: item for item in state["inputs"]}
-    current_paths = {path.relative_to(input_root).as_posix(): path for path in input_root.rglob("*") if path.is_file()}
+    current_paths = {path.relative_to(input_root).as_posix(): path for path in iter_input_files(input_root)}
     for relative, item in recorded.items():
         path = current_paths.get(relative)
         if path is None:
@@ -2193,7 +2222,7 @@ def command_verify(args: argparse.Namespace) -> int:
 # -----------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    default_root = Path(__file__).resolve().parent.parent
+    default_root = ENGINE_ROOT
     parser = argparse.ArgumentParser(description="학습노트 역할 실행 계획과 상태를 관리합니다.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -2213,7 +2242,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="실행 런타임. 생략하면 환경(Claude Code는 CLAUDECODE, Codex는 CODEX_*)에서 감지하고, 감지 실패 시 명시가 필요하다.",
     )
-    init_parser.add_argument("--root", type=Path, default=default_root)
+    init_parser.add_argument("--root", type=Path, default=default_root, help="저장소 루트. 상태는 <root>/workspace/<강의ID>/ 에 만든다.")
+    init_parser.add_argument(
+        "--state-root",
+        type=Path,
+        default=None,
+        help="상태 폴더를 직접 지정: <state-root>/<강의ID>/run_state.json. 과목 폴더에서 `gongbu run init`을 쓰면 <과목>/.gongbu 가 들어간다. --root보다 우선.",
+    )
     init_parser.add_argument(
         "--classify",
         action="append",

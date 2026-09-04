@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gongbu-haja"
+dynamic = ["version"]
+description = "3점대를 위한 공부 도우미 — 교안 + 녹음을 근거를 따라갈 수 있는 학습노트로"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [{ name = "choconyam" }]
+keywords = ["korean", "study-notes", "lecture", "transcription", "whisper", "education", "multi-agent"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Education",
+  "License :: OSI Approved :: MIT License",
+  "Natural Language :: Korean",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Education",
+]
+# 상태 관리·검증 게이트는 표준 라이브러리만 쓴다. 녹음·전사는 선택 설치.
+dependencies = []
+
+[project.optional-dependencies]
+recording = ["PyAudioWPatch>=0.2.12.7,<0.3"]
+transcription = ["faster-whisper==1.2.1", "pypdf>=5.0"]
+all = ["PyAudioWPatch>=0.2.12.7,<0.3", "faster-whisper==1.2.1", "pypdf>=5.0"]
+
+[project.urls]
+Homepage = "https://github.com/choconyam/gongbu-haja"
+Repository = "https://github.com/choconyam/gongbu-haja"
+Issues = "https://github.com/choconyam/gongbu-haja/issues"
+
+[project.scripts]
+gongbu = "gongbu_haja.cli:main"
+
+[tool.hatch.version]
+path = "gongbu_haja/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gongbu_haja"]
+
+# 저장소 루트의 엔진(스크립트·프롬프트·규칙)을 패키지 안 engine/ 으로 함께 싣는다.
+# 저장소 배치는 그대로 두고, 설치본에서는 gongbu_haja/paths.py 가 이 폴더를 엔진 루트로 쓴다.
+[tool.hatch.build.targets.wheel.force-include]
+"scripts" = "gongbu_haja/engine/scripts"
+"agent_prompts" = "gongbu_haja/engine/agent_prompts"
+"rules" = "gongbu_haja/engine/rules"
+"skills" = "gongbu_haja/engine/skills"
+".claude/agents" = "gongbu_haja/engine/.claude/agents"
+".codex" = "gongbu_haja/engine/.codex"
+"AGENTS.md" = "gongbu_haja/engine/AGENTS.md"
+"CLAUDE.md" = "gongbu_haja/engine/CLAUDE.md"
+"SKILL.md" = "gongbu_haja/engine/SKILL.md"
+"note_final_rules.md" = "gongbu_haja/engine/note_final_rules.md"
+"requirements-recording.txt" = "gongbu_haja/engine/requirements-recording.txt"
+"requirements-transcription.txt" = "gongbu_haja/engine/requirements-transcription.txt"
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/input", "/workspace", "/output", "/tmp", "/assets", "/.github"]

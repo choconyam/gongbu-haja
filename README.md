@@ -95,8 +95,44 @@ input/2026-03-10_과목A 자료로 자료 충실형 학습노트 만들어줘
 
 같은 엔진을 Codex, Claude Code, Cursor에서 사용할 수 있다. 어느 입구를 선택하든 규칙·역할·스크립트는 이 저장소 하나가 기준이다.
 
+### 전역 CLI로 설치해 과목 폴더에서 쓰기 (추천)
+
+저장소를 clone하지 않아도 된다. Python 패키지 하나를 전역에 깔면 `gongbu` 명령이 생기고, 규칙·역할 프롬프트·스크립트가 패키지 안에 함께 들어간다.
+
+```bash
+python -m pip install --user pipx && python -m pipx ensurepath
+pipx install "gongbu-haja[recording,transcription] @ git+https://github.com/choconyam/gongbu-haja"
+gongbu setup-agents
+```
+
+- `[recording]`은 Windows 온라인 강의 녹음, `[transcription]`은 로컬 Whisper 전사용 선택 의존성이다. 둘 다 필요 없으면 `pipx install "gongbu-haja @ git+https://github.com/choconyam/gongbu-haja"`.
+- `gongbu setup-agents`는 `~/.claude/agents/`와 `~/.codex/agents/`에 서브 에이전트 선언 4개를 설치한다. `~/.codex/config.toml`은 `[agents]` 절이 없을 때만 끝에 덧붙이고, 이미 있으면 손대지 않고 맞출 값만 알려준다.
+
+그 다음은 과목 폴더에서 한다. 과목 폴더 하나가 자기 자료·녹음·상태·노트를 전부 갖고, 다른 과목과 섞이지 않는다.
+
+```text
+C:\강의\미디어빅뱅과방송\                    ← 과목 폴더 (여기서 gongbu 실행, AI 도구도 여기서 열기)
+├─ 2026-03-10_1주차\                         ← 강의별 하위폴더 = 입력
+│  ├─ 1주차_교안.pdf
+│  └─ 2026-03-10_1주차_20260310_090000.wav    ← gongbu record 결과
+├─ output\                                   ← 최종 학습노트
+└─ .gongbu\2026-03-10_1주차\                 ← 실행 상태·전사·중간 산출물 (숨김 폴더)
+```
+
+```bash
+cd C:\강의\미디어빅뱅과방송
+gongbu setup                                        # .gongbu/, output/, .gitignore(녹음·상태 제외) 준비
+gongbu record --lecture-id 2026-03-10_1주차          # 온라인 강의 녹음 (Windows) → 2026-03-10_1주차\ 아래 WAV
+gongbu transcribe 2026-03-10_1주차\녹음.wav          # 로컬 전사 → .gongbu\2026-03-10_1주차\transcript\
+```
+
+이후 AI 코딩 도구(Codex, Claude Code, Cursor)에서 그 과목 폴더를 열고 "2026-03-10_1주차 자료로 자료 충실형 학습노트 만들어줘"라고 요청하면, 스킬이 `gongbu paths`로 엔진 위치를 찾고 상태를 `.gongbu/`에 만든다. `gongbu run ...`, `gongbu validate ...`는 관리자 에이전트가 쓰는 명령이라 직접 칠 일은 거의 없다. 전체 목록은 `gongbu --help`.
+
+업데이트는 `pipx upgrade gongbu-haja`. 모델표·규칙이 패키지 버전에 묶여 있어 검증을 거친 버전만 올라간다. 저장소를 직접 열어 쓰는 아래 방식들도 그대로 유효하다.
+
 | 방식 | 대상 | 설치·실행 |
 |---|---|---|
+| **전역 CLI** | Codex, Claude Code, Cursor | 위 절. `pipx install` 뒤 과목 폴더에서 `gongbu` |
 | **프로젝트로 직접 열기** | Codex, Claude Code, Cursor | `git clone` 후 저장소 폴더를 열고 요청. 세 도구 모두 루트의 `AGENTS.md` 또는 `CLAUDE.md`를 프로젝트 지침으로 사용 |
 | **Codex 스킬 설치** | Codex CLI·데스크톱 앱 | Codex에 “`$skill-installer`로 [`skills/gongbu-haja/`](https://github.com/choconyam/gongbu-haja/tree/main/skills/gongbu-haja)를 설치해줘”라고 요청 |
 | **Claude Code 플러그인** | Claude Code | `/plugin marketplace add choconyam/gongbu-haja` → `/plugin install gongbu-haja@gongbu-haja` |
@@ -300,6 +336,8 @@ gongbu-haja/
 ├─ 배치전사.bat                녹음 여러 개·폴더 드래그앤드롭 순차 전사
 ├─ requirements-recording.txt
 ├─ requirements-transcription.txt
+├─ pyproject.toml               전역 CLI 패키지 정의(pipx install → gongbu 명령)
+├─ gongbu_haja/                 gongbu 명령 본체: 엔진 위치 탐색·과목 폴더 기준 인자 보정
 ├─ agent_prompts/              역할별 프롬프트
 ├─ rules/                      공통 절차와 검수 기준
 ├─ scripts/
@@ -314,8 +352,8 @@ gongbu-haja/
 │  ├─ validate_transcript_package.py
 │  ├─ validate_note_output.py
 │  ├─ validate_agent_setup.py
-│  └─ test_*.py                상태 전이·검증기 회귀 테스트
-└─ workspace/                  강의별 런타임 산출물
+│  └─ test_*.py                상태 전이·검증기·CLI 회귀 테스트
+└─ workspace/                  강의별 런타임 산출물(저장소를 직접 연 경우; 과목 폴더에서는 .gongbu/)
 ```
 
 ## 에이전트 실행 관리

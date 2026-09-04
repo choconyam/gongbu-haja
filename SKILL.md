@@ -9,7 +9,7 @@ description: |
   become the input.
 license: MIT
 metadata:
-  version: "1.0.0"
+  version: "1.2.0"
 ---
 
 # gongbu-haja (공부하자)
@@ -20,6 +20,7 @@ metadata:
 
 다음 순서로 엔진(gongbu-haja 저장소 사본)을 찾는다.
 
+0. `gongbu paths` 명령이 실행되면(전역 CLI 설치본) 그 JSON의 `engine_root`가 엔진이고 `prompts_dir`·`rules_dir`·`agents_md`가 읽을 파일 위치다. 이 경우 스크립트는 `python scripts/...` 대신 `gongbu run|record|transcribe|review-prep|review-select|review-apply|validate ...`로 호출한다.
 1. 환경 변수 `GONGBU_HAJA_HOME`이 가리키는 폴더
 2. 현재 폴더 또는 그 상위 폴더 중 `AGENTS.md`, `agent_prompts/`, `scripts/manage_run.py`가 모두 있는 곳
 3. 사용자 홈의 `~/gongbu-haja`
@@ -40,7 +41,7 @@ git clone https://github.com/choconyam/gongbu-haja "$HOME/gongbu-haja"
 
 ## 3. 실행
 
-엔진의 `AGENTS.md`를 읽고 그 지침을 그대로 따른다. 관리자 역할 수행, 역할별 담당 실행, `scripts/manage_run.py` 상태 관리, 검증 게이트 전부 저장소 문서가 기준이며 이 스킬이 별도 규칙을 추가하지 않는다. 중간 산출물은 엔진의 `workspace/<강의ID>/`에 만들고, 최종 학습노트는 사용자가 지정한 위치(기본값: 호출한 과목 폴더)로 전달한다.
+엔진의 `AGENTS.md`를 읽고 그 지침을 그대로 따른다. 관리자 역할 수행, 역할별 담당 실행, `scripts/manage_run.py` 상태 관리, 검증 게이트 전부 저장소 문서가 기준이며 이 스킬이 별도 규칙을 추가하지 않는다. 실행 상태와 중간 산출물은 호출한 과목 폴더의 `.gongbu/<강의ID>/`에 만들고(`gongbu run init` 또는 `manage_run.py init --state-root <과목>/.gongbu`; 엔진 폴더 안에서 호출됐을 때만 `workspace/<강의ID>/`), 최종 학습노트는 사용자가 지정한 위치(기본값: 과목 폴더의 `output/`)로 전달한다.
 
 `manage_run.py next`의 실행 계약에 따라 추출·전사·후보 탐지·문맥 절단·해시·빌드·구조 검사는 로컬 Python으로 먼저 처리한다. 의미 역할은 전체 대화나 전체 원자료를 넘기지 않은 하위 에이전트에 맡긴다. `faithful`은 `quality_high` 집필과 독립 `review_high`(상위 모델 `high`) 누락 검수를, `deep`은 `quality_high` 집필·보강과 독립 `quality_xhigh` 완성본 논리 검수를 사용한다. 표에 없는 상위 모델은 기본 경로에 두지 않으며, `manage_run.py escalate`는 16KiB 이하의 실제 미해결 패킷 하나만 강의당 한 번 허용한다. 다른 런타임은 같은 비용·품질 의도를 지원 모델에 대응시킨다.
 

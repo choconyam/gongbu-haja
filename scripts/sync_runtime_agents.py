@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -131,11 +132,65 @@ def sync(root: Path) -> list[Path]:
     return written
 
 
+def user_expected_files(home: Path) -> dict[Path, str]:
+    """사용자 스코프(~/.claude/agents, ~/.codex/agents)에 둘 선언. 과목 폴더 어디서든 보인다."""
+    files: dict[Path, str] = {}
+    for profile in SUBAGENT_PROFILES:
+        stem = agent_file_stem(EXECUTION_PROFILES[profile]["agent"])
+        files[home / ".codex" / "agents" / f"{stem}.toml"] = render_codex_agent(profile)
+        files[home / ".claude" / "agents" / f"{stem}.md"] = render_claude_agent(profile)
+    return files
+
+
+CODEX_AGENTS_SECTION_RE = re.compile(r"^\[agents\]\s*$", re.MULTILINE)
+
+
+def sync_user(home: Path) -> tuple[list[Path], list[str]]:
+    """서브 에이전트 선언을 사용자 홈에 설치한다.
+
+    ~/.codex/config.toml 은 사용자의 다른 설정이 함께 있는 파일이라 덮어쓰지 않는다.
+    [agents] 절이 없을 때만 끝에 덧붙이고, 이미 있으면 손대지 않고 안내만 남긴다.
+    """
+    written: list[Path] = []
+    notices: list[str] = []
+    for path, content in user_expected_files(home).items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.is_file() or path.read_text(encoding="utf-8") != content:
+            path.write_text(content, encoding="utf-8", newline="\n")
+            written.append(path)
+    config = home / ".codex" / "config.toml"
+    block = render_codex_config()
+    if not config.is_file():
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(block, encoding="utf-8", newline="\n")
+        written.append(config)
+    else:
+        existing = config.read_text(encoding="utf-8")
+        if CODEX_AGENTS_SECTION_RE.search(existing) is None:
+            separator = "" if existing.endswith("\n") or not existing else "\n"
+            config.write_text(existing + separator + "\n" + block, encoding="utf-8", newline="\n")
+            written.append(config)
+        else:
+            notices.append(
+                f"{config} 에 이미 [agents] 절이 있어 그대로 두었습니다. 다음 값과 다르면 직접 맞추십시오:\n{block}"
+            )
+    return written, notices
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="런타임별 서브 에이전트 선언을 공통 모델표와 동기화합니다.")
     parser.add_argument("--root", type=Path, default=PROJECT_ROOT)
     parser.add_argument("--check", action="store_true", help="파일을 쓰지 않고 어긋난 곳만 보고합니다.")
+    parser.add_argument("--user-home", type=Path, default=None, help="저장소 대신 이 홈 폴더의 ~/.claude/agents, ~/.codex/agents 에 설치합니다.")
     args = parser.parse_args()
+    if args.user_home is not None:
+        written, notices = sync_user(args.user_home.expanduser().resolve())
+        for path in written:
+            print(f"갱신: {path}")
+        for notice in notices:
+            print(f"[안내] {notice}")
+        print(f"사용자 스코프 선언 동기화 완료 (변경 {len(written)}개)")
+        return 0
     root = args.root.expanduser().resolve()
     if args.check:
         problems = drift_report(root)
