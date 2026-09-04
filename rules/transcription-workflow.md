@@ -111,7 +111,7 @@ Python은 문자열 유사도나 발음 유사도만으로 전사를 고치지 �
 - 교수의 정정, 시험 범위, 과제 조건, 문제 풀이 기준;
 - 자동 전사에서 갑자기 반복되거나 문맥이 끊기는 구간.
 
-검수 에이전트는 Python이 만든 개별 후보 패킷부터 읽는다. 첫 검수는 Luna `high`로 한 번 수행한다. 숫자·수식·고유명사·평가조건처럼 중요한 미해결 구간은 `manage_run.py escalate`가 `model_input=true`, `kind=*packet`, 명시적 target, 16KiB 이하와 강의당 1회 제한을 모두 확인한 경우에만 그 패킷 하나를 Sol `high`로 재검수한다. 전체 전사 재호출이나 역할 단위 자동 승격은 하지 않는다.
+검수 에이전트는 Python이 만든 개별 후보 패킷부터 읽는다. 첫 검수는 `economy_high`로 한 번 수행한다. 숫자·수식·고유명사·평가조건처럼 중요한 미해결 구간은 `manage_run.py escalate`가 `model_input=true`, `kind=*packet`, 명시적 target, 16KiB 이하와 강의당 1회 제한을 모두 확인한 경우에만 그 패킷 하나를 `quality_high`로 재검수한다. 전체 전사 재호출이나 역할 단위 자동 승격은 하지 않는다.
 
 일부만 확인했으면 `partially_audio_verified`로 기록한다. 전체 또는 중요 구간을 정책대로 확인한 경우에만 `audio_verified`를 사용한다. 녹음이 없으면 `transcript_only`이며, 교안과 문맥으로 오탈자를 고쳐도 음성 검증으로 승격하지 않는다.
 

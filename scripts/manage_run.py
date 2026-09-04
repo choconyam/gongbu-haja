@@ -21,9 +21,25 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from .execution_profiles import (
+        EXECUTION_PROFILES,
+        RUNTIMES,
+        ProfileError,
+        detect_runtime,
+        resolve as resolve_execution_profile,
+        runtime_table,
+    )
     from .project_types import AUDIO_SUFFIXES
     from .validate_source_coverage import CoverageValidationError, validate_coverage
 except ImportError:  # `python scripts/manage_run.py`로 직접 실행할 때
+    from execution_profiles import (
+        EXECUTION_PROFILES,
+        RUNTIMES,
+        ProfileError,
+        detect_runtime,
+        resolve as resolve_execution_profile,
+        runtime_table,
+    )
     from project_types import AUDIO_SUFFIXES
     from validate_source_coverage import CoverageValidationError, validate_coverage
 
@@ -38,8 +54,8 @@ if hasattr(sys.stderr, "reconfigure"):
 # 역할 순서와 파일 확장자 분류 기준은 모든 실행 상태가 공유한다.
 # -----------------------------------------------------------------------------
 
-SCHEMA_VERSION = 2
-LEGACY_SCHEMA_VERSIONS = {1}
+SCHEMA_VERSION = 3
+LEGACY_SCHEMA_VERSIONS = {1, 2}
 DEFAULT_NOTE_MODE = "faithful"
 NOTE_MODE_CONFIG = {
     "faithful": {
@@ -59,50 +75,14 @@ NOTE_MODES = tuple(NOTE_MODE_CONFIG)
 
 # 모델 이름 자체보다 실행 책임을 먼저 고정한다. 결정적으로 끝낼 수 있는 일은
 # 모델에 보내지 않고, 의미 판단이 필요한 좁은 입력만 저비용 서브에이전트에
-# 전달한다. Codex 외 런타임은 같은 profile의 의도를 해당 제품 모델에 매핑한다.
-EXECUTION_PROFILES = {
-    "local_python": {
-        "executor": "python",
-        "description": "로컬 Python·CLI로 결정적 처리; 모델 호출 없음",
-        "codex_agent": None,
-        "codex_model": None,
-        "reasoning_effort": None,
-    },
-    "economy_high": {
-        "executor": "subagent",
-        "description": "반복적·범위 제한 의미 작업과 자료 충실형 집필",
-        "codex_agent": "study_note_worker",
-        "codex_model": "gpt-5.6-luna",
-        "reasoning_effort": "high",
-    },
-    "economy_max": {
-        "executor": "subagent",
-        "description": "자료 충실형의 독립 누락·왜곡 최종 대조",
-        "codex_agent": "faithful_note_reviewer",
-        "codex_model": "gpt-5.6-luna",
-        "reasoning_effort": "max",
-    },
-    "quality_high": {
-        "executor": "subagent",
-        "description": "심화 집필·통합 또는 자료 충실형의 국소 의미 충돌 해결",
-        "codex_agent": "quality_note_worker",
-        "codex_model": "gpt-5.6-sol",
-        "reasoning_effort": "high",
-    },
-    "quality_xhigh": {
-        "executor": "subagent",
-        "description": "심화 이해형 완성본의 독립 논리·유도 최종 검수",
-        "codex_agent": "deep_note_reviewer",
-        "codex_model": "gpt-5.6-sol",
-        "reasoning_effort": "xhigh",
-    },
-}
+# 전달한다. 프로필(EXECUTION_PROFILES)에는 모델명이 없고, 런타임(Codex·Claude)별
+# 실제 모델·effort는 execution_profiles.py의 표를 resolve_state_profile()로 해석한다.
 
 COST_POLICY = {
     "deterministic_first": True,
     "default_subagent_profile": "economy_high",
-    "faithful_writer_profile": "economy_high",
-    "faithful_final_review_profile": "economy_max",
+    "faithful_writer_profile": "quality_high",
+    "faithful_final_review_profile": "review_high",
     "deep_writer_profile": "quality_high",
     "deep_final_review_profile": "quality_xhigh",
     "targeted_escalation_profiles": ["quality_high", "quality_xhigh"],
@@ -178,8 +158,8 @@ ESCALATION_RULES: dict[str, dict[str, set[str]]] = {
 
 PREMIUM_FINAL_REVIEW_ROUTES = {
     "faithful": {
-        "route": "faithful_final_luna_max",
-        "profile": "economy_max",
+        "route": "faithful_final_review_high",
+        "profile": "review_high",
     },
     "deep": {
         "route": "deep_final_sol_xhigh",
@@ -190,16 +170,19 @@ PREMIUM_FINAL_REVIEW_ROUTES = {
 def role_execution_policy(note_mode: str) -> dict[str, dict[str, Any]]:
     """제작 모드별로 실제 모델 책임을 고정한다.
 
-    자료 추출·색인·빌드는 모드와 무관하게 Python/Luna 경로를 유지한다.
-    심화 이해형의 집필·의미 통합은 Sol high, 독립 최종 검수는 Sol xhigh다.
+    자료 추출·색인·빌드는 모드와 무관하게 Python/economy 경로를 유지한다.
+    집필·의미 통합은 두 모드 모두 quality_high다. 독립 최종 검수는 faithful이
+    review_high(상위 모델 high, source unit 대조), deep이 quality_xhigh(완성본 논리 검수)다.
     """
 
     if note_mode not in NOTE_MODE_CONFIG:
         raise RunError(f"지원하지 않는 학습노트 제작 모드입니다: {note_mode}")
     deep = note_mode == "deep"
-    author_profile = "quality_high" if deep else "economy_high"
-    author_escalation = "quality_xhigh" if deep else "quality_high"
-    final_profile = "quality_xhigh" if deep else "economy_max"
+    # 집필·의미 통합은 두 모드 모두 상위 모델(quality_high)이다. 경량 모델 집필은
+    # 교수 설명을 축약한다는 실전 결과에 따라 faithful에서도 쓰지 않는다.
+    author_profile = "quality_high"
+    author_escalation = "quality_xhigh"
+    final_profile = "quality_xhigh" if deep else "review_high"
     return {
         "transcriber": {
             "executor": "python",
@@ -274,7 +257,7 @@ def role_execution_policy(note_mode: str) -> dict[str, dict[str, Any]]:
             "primary_profile": final_profile,
             "agent_profile": final_profile,
             "repair_profile": None,
-            "escalation_profile": "quality_high" if not deep else None,
+            "escalation_profile": "quality_xhigh" if not deep else None,
             "scope": (
                 "완성본 전체를 한 번 읽고 논리·유도·교수 설명 왜곡을 독립 검수"
                 if deep
@@ -350,6 +333,21 @@ def new_cost_usage() -> dict[str, Any]:
         "premium_final_review_limit_per_cycle": PREMIUM_FINAL_REVIEW_LIMIT,
         "premium_final_reviews": [],
     }
+
+
+def resolve_state_profile(state: dict[str, Any], profile: str) -> dict[str, Any]:
+    """상태에 기록된 런타임과 모델표 스냅샷으로 프로필을 실제 모델·effort로 해석한다.
+
+    프로젝트 표가 나중에 바뀌어도 과거 실행은 자기 스냅샷 기준으로 해석·검증된다.
+    """
+
+    table = state.get("runtime_model_table")
+    try:
+        return resolve_execution_profile(
+            profile, state.get("runtime"), table if isinstance(table, dict) else None
+        )
+    except ProfileError as exc:
+        raise RunError(str(exc)) from exc
 
 
 def sha256_file(path: Path) -> str:
@@ -754,6 +752,23 @@ def migrate_state(state: dict[str, Any]) -> dict[str, Any]:
     if version not in LEGACY_SCHEMA_VERSIONS:
         return state
 
+    # v1·v2 상태는 Codex 런타임에서만 만들어졌다. 런타임과 모델표 스냅샷을 먼저 채워
+    # 이후 해석·검증이 같은 기준을 쓰게 한다.
+    state.setdefault("runtime", "codex")
+    state.setdefault("runtime_model_table", runtime_table(state["runtime"]))
+    if version == 2:
+        state["schema_version"] = SCHEMA_VERSION
+        state["execution_profiles"] = EXECUTION_PROFILES
+        state.setdefault("events", []).append(
+            {
+                "at": now_iso(),
+                "event": "state_migrated",
+                "role": "manager",
+                "detail": f"schema {version} -> {SCHEMA_VERSION}",
+            }
+        )
+        return state
+
     note_mode = state.get("note_mode")
     if note_mode not in NOTE_MODE_CONFIG:
         note_mode = DEFAULT_NOTE_MODE
@@ -794,6 +809,7 @@ def migrate_state(state: dict[str, Any]) -> dict[str, Any]:
         if isinstance(final_entry, dict) and final_entry.get("attempts", 0) > 0:
             route = PREMIUM_FINAL_REVIEW_ROUTES[note_mode]
             call_id = f"migrated-{note_mode}-cycle-{state['review_cycle']}"
+            migrated_contract = resolve_state_profile(state, route["profile"])
             try:
                 input_fingerprint = final_review_input_fingerprint(state)
             except RunError:
@@ -810,8 +826,10 @@ def migrate_state(state: dict[str, Any]) -> dict[str, Any]:
                     "role": "final_reviewer",
                     "route": route["route"],
                     "profile": route["profile"],
-                    "model": EXECUTION_PROFILES[route["profile"]]["codex_model"],
-                    "reasoning_effort": EXECUTION_PROFILES[route["profile"]]["reasoning_effort"],
+                    "runtime": migrated_contract["runtime"],
+                    "agent": migrated_contract["agent"],
+                    "model": migrated_contract["model"],
+                    "reasoning_effort": migrated_contract["effort"],
                     "attempt_kind": "full_note_audit",
                     "input_fingerprint": input_fingerprint,
                     "status": call_status,
@@ -836,6 +854,12 @@ def migrate_state(state: dict[str, Any]) -> dict[str, Any]:
 def validate_state_shape(state: dict[str, Any]) -> None:
     if state.get("schema_version") != SCHEMA_VERSION:
         raise RunError(f"지원하지 않는 실행 상태 버전입니다: {state.get('schema_version')}")
+    runtime = state.get("runtime")
+    if runtime not in RUNTIMES:
+        raise RunError(f"실행 상태의 런타임이 올바르지 않습니다: {runtime} (허용: {', '.join(RUNTIMES)})")
+    table = state.get("runtime_model_table")
+    if not isinstance(table, dict) or set(table) != set(runtime_table(runtime)):
+        raise RunError("실행 상태의 런타임 모델표 스냅샷이 없거나 프로필 목록이 프로젝트와 다릅니다.")
     note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
     if note_mode not in NOTE_MODE_CONFIG:
         raise RunError(f"알 수 없는 학습노트 제작 모드입니다: {note_mode}")
@@ -906,10 +930,11 @@ def validate_state_shape(state: dict[str, Any]) -> None:
             expected_profile = review_policy[role].get("escalation_profile")
             if review.get("profile") != expected_profile:
                 raise RunError("고강도 국소 재검수 프로필이 기록된 모드 정책과 다릅니다.")
-            profile = EXECUTION_PROFILES[expected_profile]
+            contract = resolve_state_profile(state, expected_profile)
             if (
-                review.get("model") != profile["codex_model"]
-                or review.get("reasoning_effort") != profile["reasoning_effort"]
+                review.get("runtime") != contract["runtime"]
+                or review.get("model") != contract["model"]
+                or review.get("reasoning_effort") != contract["effort"]
                 or review.get("attempt_kind") != "targeted_escalation"
             ):
                 raise RunError("고강도 국소 재검수 실행 계약이 올바르지 않습니다.")
@@ -1243,10 +1268,16 @@ def command_init(args: argparse.Namespace) -> int:
         raise RunError(f"이미 실행 상태가 있습니다. 덮어쓰지 않았습니다: {state_file}")
     # 입력 검증과 해시 계산은 락·폴더 생성 전에 끝내, 실패한 init이
     # 빈 workspace/<강의ID>/ 폴더를 남기지 않게 한다.
+    runtime = args.runtime or detect_runtime()
+    if runtime is None:
+        raise RunError(
+            "실행 런타임을 감지하지 못했습니다. --runtime codex|claude 를 지정하십시오. "
+            "(Claude Code는 CLAUDECODE, Codex는 CODEX_* 환경 변수로 감지하며 두 신호가 겹치면 명시가 필요합니다)"
+        )
     classification_overrides = parse_classification_overrides(input_root, args.classify)
     items = inventory(input_root, classification_overrides)
     with state_write_lock(state_file, create_parent=True):
-        return locked_init(args, root, input_root, state_file, classification_overrides, items)
+        return locked_init(args, root, input_root, state_file, classification_overrides, items, runtime)
 
 
 def locked_init(
@@ -1256,6 +1287,7 @@ def locked_init(
     state_file: Path,
     classification_overrides: dict[str, str],
     items: list[dict[str, Any]],
+    runtime: str,
 ) -> int:
     if state_file.exists():
         raise RunError(f"이미 실행 상태가 있습니다. 덮어쓰지 않았습니다: {state_file}")
@@ -1270,6 +1302,8 @@ def locked_init(
         "output_format": args.output_format,
         "note_mode": args.note_mode,
         "mode_contract": NOTE_MODE_CONFIG[args.note_mode],
+        "runtime": runtime,
+        "runtime_model_table": runtime_table(runtime),
         "review_cycle": 1,
         "classification_overrides": classification_overrides,
         "role_overrides": {},
@@ -1303,7 +1337,7 @@ def command_status(args: argparse.Namespace) -> int:
     mode_label = NOTE_MODE_CONFIG[note_mode]["label"]
     print(
         f"강의: {state['lecture_id']} | 제작 모드: {mode_label}({note_mode}) | "
-        f"출력: {state['output_format']} | 입력: {len(state['inputs'])}개"
+        f"런타임: {state.get('runtime')} | 출력: {state['output_format']} | 입력: {len(state['inputs'])}개"
     )
     critical_reviews = state.get("cost_usage", {}).get("critical_reviews", [])
     print(f"고강도 핵심 재검수: {len(critical_reviews)}/{CRITICAL_REVIEW_LIMIT}회")
@@ -1335,6 +1369,8 @@ def command_next(args: argparse.Namespace) -> int:
     for role in ROLE_ORDER:
         entry = state["roles"][role]
         if entry["status"] == "ready":
+            execution = entry.get("execution", execution_policy[role])
+            agent_profile = execution.get("agent_profile")
             ready.append(
                 {
                     "role": role,
@@ -1344,7 +1380,11 @@ def command_next(args: argparse.Namespace) -> int:
                     "max_attempts": entry.get("max_attempts", 2),
                     "repair_scope": entry.get("repair_scope"),
                     "repair_packet": entry.get("repair_packet"),
-                    "execution": entry.get("execution", execution_policy[role]),
+                    "execution": execution,
+                    # 관리자가 실제로 호출할 런타임의 모델·effort·에이전트 이름.
+                    "resolved_profile": (
+                        resolve_state_profile(state, agent_profile) if agent_profile else None
+                    ),
                 }
             )
     print(
@@ -1353,6 +1393,8 @@ def command_next(args: argparse.Namespace) -> int:
                 "state": str(state_file),
                 "note_mode": note_mode,
                 "mode_contract": NOTE_MODE_CONFIG[note_mode],
+                "runtime": state.get("runtime"),
+                "runtime_model_table": state.get("runtime_model_table"),
                 "execution_profiles": state.get("execution_profiles", EXECUTION_PROFILES),
                 "cost_policy": state.get("cost_policy", COST_POLICY),
                 "cost_usage": state.get(
@@ -1452,7 +1494,7 @@ def reserve_premium_final_review(state: dict[str, Any], entry: dict[str, Any]) -
         )
     profile = route["profile"]
     call_id = f"{route['route']}-cycle-{cycle}"
-    profile_contract = EXECUTION_PROFILES[profile]
+    profile_contract = resolve_state_profile(state, profile)
     calls.append(
         {
             "call_id": call_id,
@@ -1461,8 +1503,10 @@ def reserve_premium_final_review(state: dict[str, Any], entry: dict[str, Any]) -
             "role": "final_reviewer",
             "route": route["route"],
             "profile": profile,
-            "model": profile_contract["codex_model"],
-            "reasoning_effort": profile_contract["reasoning_effort"],
+            "runtime": profile_contract["runtime"],
+            "agent": profile_contract["agent"],
+            "model": profile_contract["model"],
+            "reasoning_effort": profile_contract["effort"],
             "attempt_kind": "full_note_audit",
             "input_fingerprint": input_fingerprint,
             "status": "running",
@@ -1771,7 +1815,12 @@ def command_escalate(args: argparse.Namespace) -> int:
         if not reason or len(reason) > MAX_REPAIR_SCOPE_CHARS or "\n" in reason or "\r" in reason:
             raise RunError(f"승격 이유는 한 줄 {MAX_REPAIR_SCOPE_CHARS}자 이하여야 합니다.")
         packet_path, packet_record = resolve_model_packet(args.packet, state_file)
-        profile_contract = EXECUTION_PROFILES[escalation_profile]
+        resolved_contract = resolve_state_profile(state, escalation_profile)
+        profile_contract = {
+            **EXECUTION_PROFILES[escalation_profile],
+            **resolved_contract,
+            "reasoning_effort": resolved_contract["effort"],
+        }
         call_id = f"critical-review-{len(reviews) + 1}"
         started_at = now_iso()
         review = {
@@ -1786,8 +1835,10 @@ def command_escalate(args: argparse.Namespace) -> int:
             "reason": reason,
             "profile": escalation_profile,
             "note_mode": note_mode,
-            "model": profile_contract["codex_model"],
-            "reasoning_effort": profile_contract["reasoning_effort"],
+            "runtime": profile_contract["runtime"],
+            "agent": profile_contract["agent"],
+            "model": profile_contract["model"],
+            "reasoning_effort": profile_contract["effort"],
             "review_cycle": state.get("review_cycle", 1),
             "packet": packet_record,
         }
@@ -2038,10 +2089,11 @@ def verify_premium_final_reviews(state: dict[str, Any]) -> list[str]:
         route = PREMIUM_FINAL_REVIEW_ROUTES.get(mode)
         if route is None:
             continue
-        profile = EXECUTION_PROFILES[route["profile"]]
+        contract = resolve_state_profile(state, route["profile"])
         if (
-            call.get("model") != profile["codex_model"]
-            or call.get("reasoning_effort") != profile["reasoning_effort"]
+            call.get("runtime") != contract["runtime"]
+            or call.get("model") != contract["model"]
+            or call.get("reasoning_effort") != contract["effort"]
             or call.get("attempt_kind") != "full_note_audit"
         ):
             errors.append(f"완성본 고비용 검수 실행 계약이 변조됨: {call.get('call_id')}")
@@ -2152,8 +2204,14 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument(
         "--note-mode",
         choices=NOTE_MODES,
-        default=DEFAULT_NOTE_MODE,
-        help="학습노트 제작 모드: faithful=자료 충실형(기본), deep=심화 이해형",
+        required=True,
+        help="학습노트 제작 모드(필수): faithful=자료 충실형, deep=심화 이해형. 사용자가 고르지 않았으면 먼저 물어본다.",
+    )
+    init_parser.add_argument(
+        "--runtime",
+        choices=RUNTIMES,
+        default=None,
+        help="실행 런타임. 생략하면 환경(Claude Code는 CLAUDECODE, Codex는 CODEX_*)에서 감지하고, 감지 실패 시 명시가 필요하다.",
     )
     init_parser.add_argument("--root", type=Path, default=default_root)
     init_parser.add_argument(

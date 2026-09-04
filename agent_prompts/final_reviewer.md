@@ -6,10 +6,10 @@
 
 실행 프로필과 검수 범위는 제작 모드에 따라 다르다.
 
-- `faithful`: `economy_max`(Luna `max`)로 source map의 모든 `source_unit_id`를 대응 노트 위치와 대조해 누락·왜곡·중복·불필요한 외부 보강을 찾는다. 깊은 배경 설명을 새로 만들지 않는다.
-- `deep`: 작성 담당과 분리된 `quality_xhigh`(Sol `xhigh`)로 완성본 전체를 정확히 한 번 읽고 논리 순서, 선행개념, 중간 사고, 유도, 가정, 적용 조건과 교수 설명 왜곡을 검수한다. 전체 원시 전사·녹음·교안을 다시 입력하지 않고 압축된 source map과 위험 근거만 함께 본다.
+- `faithful`: `review_high`로 source map의 모든 `source_unit_id`를 대응 노트 위치와 대조해 누락·왜곡·중복·불필요한 외부 보강을 찾는다. 깊은 배경 설명을 새로 만들지 않는다.
+- `deep`: 작성 담당과 분리된 `quality_xhigh`로 완성본 전체를 정확히 한 번 읽고 논리 순서, 선행개념, 중간 사고, 유도, 가정, 적용 조건과 교수 설명 왜곡을 검수한다. 전체 원시 전사·녹음·교안을 다시 입력하지 않고 압축된 source map과 위험 근거만 함께 본다.
 
-완성본 전체 검수는 현재 `review_cycle`에서 정확히 한 번만 실행한다. 그 호출에서 발견한 문제는 최종본을 통째로 다시 쓰지 말고 국소 패치로 반영한 뒤, 바뀐 위치와 coverage만 다시 확인해 같은 호출 안에서 끝낸다. `faithful`에서 의미 충돌이 해결되지 않을 때만 `manage_run.py escalate`가 허용한 16KiB 이하 패킷을 `quality_high`(Sol `high`)로 한 번 넘긴다. `deep`은 이미 xhigh 최종 검수를 수행하므로 자동 추가 승격하지 않는다.
+완성본 전체 검수는 현재 `review_cycle`에서 정확히 한 번만 실행한다. 그 호출에서 발견한 문제는 최종본을 통째로 다시 쓰지 말고 국소 패치로 반영한 뒤, 바뀐 위치와 coverage만 다시 확인해 같은 호출 안에서 끝낸다. `faithful`에서 의미 충돌이 해결되지 않을 때만 `manage_run.py escalate`가 허용한 16KiB 이하 패킷을 `quality_high`로 한 번 넘긴다. `deep`은 이미 xhigh 최종 검수를 수행하므로 자동 추가 승격하지 않는다.
 
 ## 반드시 읽을 기준
 
@@ -58,7 +58,7 @@
   "kind": "study_note_source_coverage",
   "schema_version": 1,
   "note_mode": "faithful 또는 deep",
-  "reviewer_profile": "faithful이면 economy_max, deep이면 quality_xhigh",
+  "reviewer_profile": "faithful이면 review_high, deep이면 quality_xhigh",
   "items": [
     {
       "source_unit_id": "Python source map의 ID",

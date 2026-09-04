@@ -9,7 +9,16 @@
 - **담당 에이전트**: 관리자가 특정 역할 프롬프트와 입력 묶음, 출력 계약을 배정해 실행한 별도 모델 프로세스다.
 - **Python 게이트**: 입력 해시, 파일 구조, 선후관계, 산출물 존재, 문법과 빌드를 결정적으로 검사하는 코드다. 의미 판단을 대신하지 않는다.
 - **문맥 묶음**: 한 역할이 현재 단원을 처리하는 데 필요한 원문 구간과 선행 산출물만 모은 입력이다.
-- **실행 프로필**: 역할을 `local_python`, `economy_high`, `economy_max`, `quality_high`, `quality_xhigh` 중 어디에 배정할지 나타내는 비용·품질 계약이다. Codex에서는 각각 Python, Luna `high`, Luna `max`, Sol `high`, Sol `xhigh`에 대응하며 다른 런타임은 같은 의도로 매핑한다.
+- **실행 프로필**: 역할을 `local_python`, `economy_high`, `review_high`, `quality_high`, `quality_xhigh` 중 어디에 배정할지 나타내는 비용·품질 계약이다. 프로필에는 모델명이 없다. 런타임별 실제 모델·effort는 `../scripts/execution_profiles.py`의 표가 정하고, `manage_run.py init`이 감지(또는 `--runtime`으로 지정)한 런타임의 표 스냅샷을 상태에 기록해 이후 해석과 검증에 쓴다. 현재 표는 다음과 같다(등급 대응이지 등가가 아니다).
+
+  | 프로필 | Codex | Claude Code |
+  |---|---|---|
+  | `economy_high` | `gpt-5.6-luna` / `high` | `claude-sonnet-5` / `high` |
+  | `review_high` | `gpt-5.6-sol` / `high` | `claude-opus-5` / `high` |
+  | `quality_high` | `gpt-5.6-sol` / `high` | `claude-opus-5` / `high` |
+  | `quality_xhigh` | `gpt-5.6-sol` / `xhigh` | `claude-opus-5` / `xhigh` |
+
+  Codex의 Terra와 Claude의 Haiku는 표에 두지 않는다. 모델은 별칭이 아니라 전체 ID로 고정한다. 새 모델이 나와도 자동으로 바뀌지 않으며, 검증을 거친 뒤 표를 갱신해야 사용감이 바뀐다.
 
 실제 모델 프로세스가 배정되지 않았다면 “해당 에이전트를 실행했다”고 기록하지 않는다. 다만 실행 상태에서 `executor=python`인 역할은 별도 에이전트가 아니라 기록된 Python 명령과 산출물로 실행한다.
 
@@ -53,12 +62,12 @@ Python이 만든 후보를 확정 사실로 승격하지 않는다. 자동 치�
 
 ### 비용 우선 서브에이전트 정책
 
-- 전사 후보 판정, 자료 대응, 조판 표본처럼 범위가 제한된 반복 의미 작업은 `economy_high`(`gpt-5.6-luna`, `high`)로 실행한다.
-- `faithful` 집필은 `economy_high`, 모든 source unit의 누락·왜곡·중복을 독립 대조하는 최종 검수는 `economy_max`(`gpt-5.6-luna`, `max`)로 실행한다. 이 검수는 외부 배경지식을 만들지 않는다.
-- `deep` 집필·교수 설명 통합·교육 보강·수식 의미 검수는 `quality_high`(`gpt-5.6-sol`, `high`)로 실행한다. 완성본 전체의 논리 순서, 선행개념, 중간 사고, 유도와 적용 조건을 보는 독립 최종 검수 1회는 `quality_xhigh`(`gpt-5.6-sol`, `xhigh`)로 실행한다.
-- 모드별 최종 Luna `max` 또는 Sol `xhigh` 완성본 검수는 `run_state.json`의 현재 `review_cycle`에 시작 전에 예약하고 한 번만 실행한다. source map과 조판 산출물의 SHA-256 지문이 이전 호출과 같으면 cycle 번호가 달라도 거부한다. 입력·제작 모드·명시적 사용자 편집 계약이 바뀌면 새 cycle을 열되, 실패 복구나 같은 완성본 재독을 위해 cycle을 늘리지 않는다.
-- Terra는 실행 프로필에 두지 않는다. Sol `max`와 모든 역할의 일괄 Sol 실행도 기본 경로에 두지 않는다.
-- 숫자·고유명사·수식·평가조건·근거 충돌·논리 또는 유도 공백이 남으면 **작고 중요한 미해결 패킷 하나만** `manage_run.py escalate`에 통과시킨다. `faithful`의 국소 충돌은 `quality_high`, `deep`의 집필 단계 국소 충돌은 `quality_xhigh`로 강의당 한 번만 재검수한다. `deep` 최종 검수는 이미 `quality_xhigh`이므로 다시 승격하지 않는다.
+- 전사 후보 판정, 자료 대응, 조판 표본처럼 범위가 제한된 반복 의미 작업은 `economy_high`로 실행한다.
+- `faithful` 집필도 `quality_high`로 실행한다(경량 모델 집필은 교수 설명을 축약한다는 실전 결과). 모든 source unit의 누락·왜곡·약화를 독립 대조하는 최종 검수는 `review_high`(상위 모델 `high`)로 실행한다. 이 검수는 외부 배경지식을 만들지 않는다.
+- `deep` 집필·교수 설명 통합·교육 보강·수식 의미 검수는 `quality_high`로 실행한다. 완성본 전체의 논리 순서, 선행개념, 중간 사고, 유도와 적용 조건을 보는 독립 최종 검수 1회는 `quality_xhigh`로 실행한다.
+- 모드별 최종 `review_high` 또는 `quality_xhigh` 완성본 검수는 `run_state.json`의 현재 `review_cycle`에 시작 전에 예약하고 한 번만 실행한다. source map과 조판 산출물의 SHA-256 지문이 이전 호출과 같으면 cycle 번호가 달라도 거부한다. 입력·제작 모드·명시적 사용자 편집 계약이 바뀌면 새 cycle을 열되, 실패 복구나 같은 완성본 재독을 위해 cycle을 늘리지 않는다.
+- 런타임 모델표에 없는 상위 모델과 모든 역할의 일괄 상위 프로필 실행은 기본 경로에 두지 않는다.
+- 숫자·고유명사·수식·평가조건·근거 충돌·논리 또는 유도 공백이 남으면 **작고 중요한 미해결 패킷 하나만** `manage_run.py escalate`에 통과시킨다. 국소 충돌은 두 모드 모두 `quality_xhigh`로 강의당 한 번만 재검수한다. `deep` 최종 검수는 이미 `quality_xhigh`이므로 다시 승격하지 않는다.
 - 한 역할의 전체 재시도 기본 횟수는 0회다. 실패한 절·구간만 고친 뒤 해당 범위와 하위 산출물만 다시 검사한다.
 - 관리자 에이전트는 범위·상태·충돌·최종 완료만 관리한다. 담당 역할을 대신해 전체 전사나 전체 노트를 반복 집필하지 않는다.
 - 런타임이 서브에이전트 모델 선택을 지원하면 전체 대화 이력을 상속하지 않고 역할 프롬프트와 제한된 근거 묶음만 전달한다. 지원하지 않으면 같은 입력 경계를 유지해 순차 실행한다.
@@ -70,12 +79,12 @@ Python이 만든 후보를 확정 사실로 승격하지 않는다. 자동 치�
 | `transcriber` | Python | 없음 | 없음 |
 | `transcript_auditor` | Python 후보 생성 + 서브에이전트 | 두 모드 `economy_high` | 중요 미해결 개별 패킷만 `quality_high` |
 | `source_mapper` | Python 인벤토리·안정 ID + 서브에이전트 | 두 모드 `economy_high` | 근거 충돌 핵심 패킷만 `quality_high` |
-| `writer` | 서브에이전트 | `faithful=economy_high`, `deep=quality_high` | 모드별 `quality_high` 또는 `quality_xhigh` |
-| `instructor_integrator` | 서브에이전트 | `faithful=economy_high`, `deep=quality_high` | 왜곡 위험 핵심 패킷만 모드별 고강도 프로필 |
-| `formula_code_checker` | Python 계산·실행 + 서브에이전트 | `faithful=economy_high`, `deep=quality_high` | 핵심 수식 충돌만 모드별 고강도 프로필 |
-| `pedagogy_editor` | 서브에이전트 | `faithful=economy_high`, `deep=quality_high` | 핵심 개념·유도 공백만 모드별 고강도 프로필 |
+| `writer` | 서브에이전트 | 두 모드 `quality_high` | 모드별 `quality_high` 또는 `quality_xhigh` |
+| `instructor_integrator` | 서브에이전트 | 두 모드 `quality_high` | 왜곡 위험 핵심 패킷만 모드별 고강도 프로필 |
+| `formula_code_checker` | Python 계산·실행 + 서브에이전트 | 두 모드 `quality_high` | 핵심 수식 충돌만 모드별 고강도 프로필 |
+| `pedagogy_editor` | 서브에이전트 | 두 모드 `quality_high` | 핵심 개념·유도 공백만 모드별 고강도 프로필 |
 | `layout_builder` | Python 빌드·렌더 + 서브에이전트 표본 검수 | 두 모드 `economy_high` | 없음; 렌더·구조 오류는 Python 또는 같은 프로필 국소 수정 |
-| `final_reviewer` | 서브에이전트 | `faithful=economy_max`, `deep=quality_xhigh` | `faithful`의 의미 충돌만 `quality_high`; `deep` 추가 승격 없음 |
+| `final_reviewer` | 서브에이전트 | `faithful=review_high`, `deep=quality_xhigh` | `faithful`의 의미 충돌만 `quality_xhigh`; `deep` 추가 승격 없음 |
 | `maintainer` | Python | 없음 | 없음 |
 
 ## 3. 최소 실행 경로
@@ -143,7 +152,7 @@ Python이 만든 후보를 확정 사실로 승격하지 않는다. 자동 치�
 1. 저장된 `source_map`을 재사용하거나 변경 페이지에 한해 갱신한다.
 2. `writer`가 교안별 설명과 교수 고유 설명을 한 번에 통합한다.
 3. `layout_builder`가 최종 형식으로 만들고 전 페이지를 한 번 렌더 검수한다.
-4. `faithful`의 `final_reviewer`는 모든 source unit의 누락·왜곡을 Luna `max`로 대조하고, `deep`의 `final_reviewer`는 완성본 전체의 논리·유도를 Sol `xhigh`로 한 번 검수한다.
+4. `faithful`의 `final_reviewer`는 모든 source unit의 누락·왜곡을 `review_high`로 대조하고, `deep`의 `final_reviewer`는 완성본 전체의 논리·유도를 `quality_xhigh`로 한 번 검수한다.
 5. coverage report를 Python 게이트로 검증하고 source map과 함께 실행 상태에 기록한다.
 
 입력이 그대로인데 디자인이나 출력 순서만 바뀌면 다음처럼 조판 이후만 다시 연다.

@@ -7,10 +7,16 @@ import argparse
 import json
 import re
 import sys
-import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from urllib.parse import unquote
+
+try:
+    from .execution_profiles import FORBIDDEN_MODELS
+    from .sync_runtime_agents import drift_report as runtime_declaration_drift
+except ImportError:  # `python scripts/validate_agent_setup.py`로 직접 실행할 때
+    from execution_profiles import FORBIDDEN_MODELS
+    from sync_runtime_agents import drift_report as runtime_declaration_drift
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -230,60 +236,29 @@ def validate_packaging(root: Path, report: Report) -> None:
         if text is not None and f"${PACKAGE_NAME}" not in text:
             report.add("error", "packaging-drift", f"openai.yaml에 ${PACKAGE_NAME} 호출 토큰이 없습니다.", openai_yaml)
 
-    codex_config = root / ".codex" / "config.toml"
-    codex_workers = {
-        "study-note-worker.toml": ("gpt-5.6-luna", "high"),
-        "faithful-note-reviewer.toml": ("gpt-5.6-luna", "max"),
-        "quality-note-worker.toml": ("gpt-5.6-sol", "high"),
-        "deep-note-reviewer.toml": ("gpt-5.6-sol", "xhigh"),
-    }
-    if not codex_config.is_file():
-        report.add("error", "missing-packaging", "프로젝트 범위 Codex 하위 에이전트 설정이 없습니다.", codex_config)
-    else:
-        try:
-            config_payload = tomllib.loads(codex_config.read_text(encoding="utf-8-sig"))
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-            report.add("error", "invalid-packaging", f"Codex 설정 TOML을 읽을 수 없습니다: {exc}", codex_config)
-        else:
-            agents = config_payload.get("agents", {})
-            if agents.get("default_subagent_model") != "gpt-5.6-luna":
-                report.add("error", "cost-routing-drift", "기본 Codex 하위 모델이 gpt-5.6-luna가 아닙니다.", codex_config)
-            if agents.get("default_subagent_reasoning_effort") != "high":
-                report.add("error", "cost-routing-drift", "기본 Codex 하위 추론 강도가 high가 아닙니다.", codex_config)
-            concurrency = agents.get("max_concurrent_threads_per_session")
-            if not isinstance(concurrency, int) or isinstance(concurrency, bool) or not 1 <= concurrency <= 2:
-                report.add("error", "cost-routing-drift", "동시 하위 에이전트 수는 1~2여야 합니다.", codex_config)
-
-    codex_agent_dir = root / ".codex" / "agents"
-    for path in codex_agent_dir.glob("*.toml") if codex_agent_dir.is_dir() else ():
-        text = read_utf8(path, report)
-        if text is not None and "gpt-5.6-terra" in text:
-            report.add(
-                "error",
-                "cost-routing-drift",
-                "Terra는 이 프로젝트의 실행 프로필에서 사용하지 않습니다.",
-                path,
-            )
-    for filename, (expected_model, expected_effort) in codex_workers.items():
-        path = codex_agent_dir / filename
-        if not path.is_file():
-            report.add("error", "missing-packaging", "Codex 역할 프로필이 없습니다.", path)
-            continue
-        try:
-            payload = tomllib.loads(path.read_text(encoding="utf-8-sig"))
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-            report.add("error", "invalid-packaging", f"Codex 역할 TOML을 읽을 수 없습니다: {exc}", path)
-            continue
-        for field in ("name", "description", "developer_instructions"):
-            if not isinstance(payload.get(field), str) or not payload[field].strip():
-                report.add("error", "invalid-packaging", f"Codex 역할에 {field}가 없습니다.", path)
-        if payload.get("model") != expected_model or payload.get("model_reasoning_effort") != expected_effort:
-            report.add(
-                "error",
-                "cost-routing-drift",
-                f"Codex 역할 모델은 {expected_model}/{expected_effort}여야 합니다.",
-                path,
-            )
+    # 런타임별 서브 에이전트 선언(.codex/config.toml, .codex/agents/, .claude/agents/)은
+    # execution_profiles.py의 공통 모델표에서 생성된다. 손으로 고쳐 표와 어긋나면 오류다.
+    for problem in runtime_declaration_drift(root):
+        report.add(
+            "error",
+            "runtime-declaration-drift",
+            f"런타임 선언이 모델표와 어긋납니다 — python scripts/sync_runtime_agents.py 로 동기화하십시오: {problem}",
+            root,
+        )
+    for runtime, forbidden_models in FORBIDDEN_MODELS.items():
+        agent_dir = root / (".codex" if runtime == "codex" else ".claude") / "agents"
+        for path in sorted(agent_dir.glob("*")) if agent_dir.is_dir() else ():
+            text = read_utf8(path, report)
+            if text is None:
+                continue
+            for model in forbidden_models:
+                if model in text:
+                    report.add(
+                        "error",
+                        "cost-routing-drift",
+                        f"{runtime} 선언에 기본 경로에서 쓰지 않는 모델이 있습니다: {model}",
+                        path,
+                    )
 
 
 def validate(root: Path) -> Report:
@@ -358,6 +333,10 @@ def validate(root: Path) -> Report:
         "test_select_review_packets.py",
         "test_apply_transcript_corrections.py",
         "test_validate_source_coverage.py",
+        "test_execution_profiles.py",
+        "test_sync_runtime_agents.py",
+        "execution_profiles.py",
+        "sync_runtime_agents.py",
         "project_types.py",
         "record_lecture.py",
         "transcribe_lecture.py",

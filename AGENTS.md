@@ -22,8 +22,9 @@
 - 관리자는 범위를 확정하고 실행 계획, 역할 상태, 실패 반환을 관리한다. 모든 본문을 혼자 작성하지 않는다.
 - 런타임이 하위 에이전트를 지원하면 필요한 역할마다 독립된 에이전트 프로세스를 실행한다. 지원하지 않으면 역할별 입력과 산출물을 분리한 순차 작업으로 같은 경계를 지킨다.
 - `manage_run.py next`의 `execution` 계약을 따른다. 추출·해시·전사·후보 탐지·문맥 절단·빌드·구조 검사는 Python을 먼저 사용하고, 의미 판단만 제한된 근거 묶음과 함께 하위 에이전트에 보낸다.
-- 반복·제한 의미 작업의 기본은 `economy_high`(`gpt-5.6-luna`, `high`)다. `faithful` 집필은 Luna `high`, 모든 source unit의 누락·왜곡 최종 대조는 Luna `max`다. `deep` 집필·의미 보강은 Sol `high`, 완성본 전체의 독립 논리 검수 1회는 Sol `xhigh`다. Terra와 Sol `max`는 기본 경로에 두지 않는다. `manage_run.py next`가 반환한 프로필을 임의로 바꾸지 않는다.
-- 최종 Luna `max` 또는 Sol `xhigh` 호출은 현재 `review_cycle`에 시작 전 예약하며 한 번만 허용한다. source map과 조판 산출물의 SHA-256 지문이 과거 호출과 같으면 cycle 번호가 달라도 다시 호출하지 않는다. 발견한 국소 문제는 같은 호출 안에서 수정·해당 위치 재확인까지 끝낸다.
+- 반복·제한 의미 작업의 기본은 `economy_high`다. `faithful` 집필도 `quality_high`(상위 모델)이고, 모든 source unit의 누락·왜곡·약화 최종 대조는 `review_high`(상위 모델 `high`)다. 경량 모델은 집필·최종 판정에 쓰지 않는다. `deep` 집필·의미 보강은 `quality_high`, 완성본 전체의 독립 논리 검수 1회는 `quality_xhigh`다. 표에 없는 상위 모델은 기본 경로에 두지 않는다. `manage_run.py next`가 반환한 프로필을 임의로 바꾸지 않는다.
+- 실행 런타임(Codex 또는 Claude Code)은 `init`이 환경에서 감지해 상태에 기록하고, 감지에 실패하면 `--runtime codex|claude`를 명시한다. 프로필의 실제 모델·effort는 `manage_run.py next`가 그 런타임의 표로 해석해 돌려주며, 두 런타임의 등급은 대응이지 등가가 아니다.
+- 최종 `review_high` 또는 `quality_xhigh` 호출은 현재 `review_cycle`에 시작 전 예약하며 한 번만 허용한다. source map과 조판 산출물의 SHA-256 지문이 과거 호출과 같으면 cycle 번호가 달라도 다시 호출하지 않는다. 발견한 국소 문제는 같은 호출 안에서 수정·해당 위치 재확인까지 끝낸다.
 - 정말 중요한 미해결 패킷만 `manage_run.py escalate`가 `model_input=true`, `kind=*packet`, 명시적 target, 16KiB 이하, 역할·오류 분류와 사용 횟수를 확인한 뒤 현재 모드의 `quality_high` 또는 `quality_xhigh`로 강의당 한 번 승격한다. 전체 역할이나 전체 원자료를 승격 입력으로 보내지 않는다.
 - 하위 에이전트는 동시에 최대 2개만 실행하고, 서로 독립적인 작업만 병렬화한다. 같은 원자료를 여러 에이전트에 복제하는 병렬화는 하지 않는다.
 - 의미 역할 전체를 자동 재시도하지 않는다. 첫 시도가 실패하면 실패한 페이지·절·전사 구간만 근거를 보강해 최대 한 번 다시 검수한다.

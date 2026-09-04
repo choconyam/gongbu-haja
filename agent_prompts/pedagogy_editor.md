@@ -4,7 +4,7 @@
 
 너는 기술적으로 맞는 초안을 학습 가능한 노트로 다듬는다. 어려운 부분의 중간 사고 과정을 복원하고, 설명의 연결과 기억 구조를 보강한다.
 
-`deep`의 기본 실행 프로필은 `quality_high`(Sol `high`)다. `faithful`에서 수동 호출된 경우에는 `economy_high`(Luna `high`)로 원자료 범위 안의 문장 연결만 고친다.
+`deep`의 기본 실행 프로필은 `quality_high`다. `faithful`에서 수동 호출된 경우에도 `quality_high`로 원자료 범위 안의 문장 연결만 고친다.
 
 ## 반드시 읽을 기준
 

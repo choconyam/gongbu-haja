@@ -42,9 +42,9 @@ git clone https://github.com/choconyam/gongbu-haja "$HOME/gongbu-haja"
 
 엔진의 `AGENTS.md`를 읽고 그 지침을 그대로 따른다. 관리자 역할 수행, 역할별 담당 실행, `scripts/manage_run.py` 상태 관리, 검증 게이트 전부 저장소 문서가 기준이며 이 스킬이 별도 규칙을 추가하지 않는다. 중간 산출물은 엔진의 `workspace/<강의ID>/`에 만들고, 최종 학습노트는 사용자가 지정한 위치(기본값: 호출한 과목 폴더)로 전달한다.
 
-`manage_run.py next`의 실행 계약에 따라 추출·전사·후보 탐지·문맥 절단·해시·빌드·구조 검사는 로컬 Python으로 먼저 처리한다. 의미 역할은 전체 대화나 전체 원자료를 넘기지 않은 하위 에이전트에 맡긴다. `faithful`은 Luna `high` 집필과 독립 Luna `max` 누락 검수를, `deep`은 Sol `high` 집필·보강과 독립 Sol `xhigh` 완성본 논리 검수를 사용한다. Terra와 Sol `max`는 기본 경로에 두지 않으며, `manage_run.py escalate`는 16KiB 이하의 실제 미해결 패킷 하나만 강의당 한 번 허용한다. 다른 런타임은 같은 비용·품질 의도를 지원 모델에 대응시킨다.
+`manage_run.py next`의 실행 계약에 따라 추출·전사·후보 탐지·문맥 절단·해시·빌드·구조 검사는 로컬 Python으로 먼저 처리한다. 의미 역할은 전체 대화나 전체 원자료를 넘기지 않은 하위 에이전트에 맡긴다. `faithful`은 `quality_high` 집필과 독립 `review_high`(상위 모델 `high`) 누락 검수를, `deep`은 `quality_high` 집필·보강과 독립 `quality_xhigh` 완성본 논리 검수를 사용한다. 표에 없는 상위 모델은 기본 경로에 두지 않으며, `manage_run.py escalate`는 16KiB 이하의 실제 미해결 패킷 하나만 강의당 한 번 허용한다. 다른 런타임은 같은 비용·품질 의도를 지원 모델에 대응시킨다.
 
-최종 Luna `max` 또는 Sol `xhigh` 호출은 상태 파일의 현재 `review_cycle`에서 한 번만 예약한다. 발견한 국소 문제는 같은 호출 안에서 수정·해당 위치 재확인까지 끝내며, 실패 복구를 이유로 같은 완성본 전체를 다시 호출하지 않는다.
+최종 `review_high` 또는 `quality_xhigh` 호출은 상태 파일의 현재 `review_cycle`에서 한 번만 예약한다. 발견한 국소 문제는 같은 호출 안에서 수정·해당 위치 재확인까지 끝내며, 실패 복구를 이유로 같은 완성본 전체를 다시 호출하지 않는다.
 
 최종 검수는 Python source map의 모든 `source_unit_id`를 `included`, `merged`, 이유 있는 `excluded`, 노트 위치가 표시된 `unresolved` 중 하나로 정확히 한 번 처리한 coverage report를 남긴다. `scripts/validate_source_coverage.py`와 `manage_run.py complete --source-map ... --coverage-report ...`가 통과하기 전에는 완료로 보고하지 않는다.
 

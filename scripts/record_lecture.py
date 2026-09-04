@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import wave
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -291,15 +292,28 @@ def capture_to_wav(
             frames_per_buffer=frames_per_buffer,
         )
         frame_limit = math.ceil(duration * sample_rate) if duration is not None else None
+        # WASAPI loopback은 재생이 멈추면 프레임을 전혀 주지 않고, stream.read()는 그때
+        # 무한히 블로킹된다. 읽기 전에 가용 프레임을 확인하고, 종료는 프레임 수가 아니라
+        # 벽시계 기준으로도 판정해 무음·일시정지 구간에서 녹음이 멈추지 않게 한다.
+        read_available = getattr(stream, "get_read_available", None)
+        deadline = time.monotonic() + duration if duration is not None else None
         with wave.open(str(temp_path), "wb") as output:
             output.setnchannels(channels)
             output.setsampwidth(sample_width)
             output.setframerate(sample_rate)
             try:
                 while frame_limit is None or captured_frames < frame_limit:
+                    if deadline is not None and time.monotonic() >= deadline:
+                        break
                     requested = frames_per_buffer
                     if frame_limit is not None:
                         requested = min(requested, frame_limit - captured_frames)
+                    if read_available is not None:
+                        available = int(read_available())
+                        if available <= 0:
+                            time.sleep(0.05)
+                            continue
+                        requested = min(requested, available)
                     data = stream.read(requested, exception_on_overflow=False)
                     output.writeframesraw(data)
                     captured_frames += requested

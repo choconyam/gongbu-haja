@@ -26,7 +26,7 @@ SOURCE_MAP_KIND = "study_note_source_map"
 COVERAGE_KIND = "study_note_source_coverage"
 SCHEMA_VERSION = 1
 NOTE_MODES = {"faithful", "deep"}
-REVIEWER_PROFILES = {"faithful": "economy_max", "deep": "quality_xhigh"}
+REVIEWER_PROFILES = {"faithful": "review_high", "deep": "quality_xhigh"}
 DECISIONS = {"included", "merged", "excluded", "unresolved"}
 
 

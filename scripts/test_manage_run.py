@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -15,15 +16,38 @@ from pathlib import Path
 SCRIPT = Path(__file__).with_name("manage_run.py")
 
 
+def runtime_neutral_env(**extra: str) -> dict[str, str]:
+    """런타임 감지 신호(CLAUDE*, CODEX_*)를 걷어낸 하위 프로세스 환경."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("CLAUDE", "CODEX_"))}
+    env.update(extra)
+    return env
+
+
 class ManageRunTests(unittest.TestCase):
     # CLI를 실제 하위 프로세스로 실행해 출력과 종료 코드까지 함께 확인한다.
+    # init에는 런타임과 제작 모드가 필수이므로, 기존 시나리오는 Codex·faithful을 기본으로 넣는다.
     def run_cli(self, *arguments: str, expected: int = 0) -> subprocess.CompletedProcess[str]:
+        command = list(arguments)
+        if command and command[0] == "init":
+            if "--runtime" not in command:
+                command += ["--runtime", "codex"]
+            if "--note-mode" not in command:
+                command += ["--note-mode", "faithful"]
+        return self.run_raw(*command, expected=expected)
+
+    def run_raw(
+        self,
+        *arguments: str,
+        expected: int = 0,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
             [sys.executable, str(SCRIPT), *arguments],
             capture_output=True,
             text=True,
             encoding="utf-8",
             check=False,
+            env=env,
         )
         self.assertEqual(expected, result.returncode, msg=result.stdout + result.stderr)
         return result
@@ -51,7 +75,7 @@ class ManageRunTests(unittest.TestCase):
                     "kind": "study_note_source_coverage",
                     "schema_version": 1,
                     "note_mode": mode,
-                    "reviewer_profile": "economy_max" if mode == "faithful" else "quality_xhigh",
+                    "reviewer_profile": "review_high" if mode == "faithful" else "quality_xhigh",
                     "items": [
                         {
                             "source_unit_id": "handout-page-1",
@@ -249,7 +273,9 @@ class ManageRunTests(unittest.TestCase):
             self.run_cli("status", str(state_file))
             self.run_cli("refresh-inputs", str(state_file))
             migrated = json.loads(state_file.read_text(encoding="utf-8"))
-            self.assertEqual(2, migrated["schema_version"])
+            self.assertEqual(3, migrated["schema_version"])
+            self.assertEqual("codex", migrated["runtime"])
+            self.assertEqual("gpt-5.6-luna", migrated["runtime_model_table"]["economy_high"]["model"])
             self.assertEqual(1, migrated["review_cycle"])
             self.assertEqual(1, migrated["roles"]["final_reviewer"]["max_attempts"])
             self.assertEqual([], migrated["cost_usage"]["premium_final_reviews"])
@@ -277,21 +303,21 @@ class ManageRunTests(unittest.TestCase):
             self.assertEqual("economy_high", state["cost_policy"]["default_subagent_profile"])
             self.assertEqual(0, state["cost_policy"]["full_role_retries"])
             self.assertFalse(state["cost_policy"]["automatic_flagship_escalation"])
-            self.assertEqual("gpt-5.6-luna", state["execution_profiles"]["economy_high"]["codex_model"])
-            self.assertEqual("high", state["execution_profiles"]["economy_high"]["reasoning_effort"])
-            self.assertEqual("gpt-5.6-luna", state["execution_profiles"]["economy_max"]["codex_model"])
-            self.assertEqual("max", state["execution_profiles"]["economy_max"]["reasoning_effort"])
-            self.assertEqual("gpt-5.6-sol", state["execution_profiles"]["quality_high"]["codex_model"])
-            self.assertEqual("high", state["execution_profiles"]["quality_high"]["reasoning_effort"])
-            self.assertEqual("gpt-5.6-sol", state["execution_profiles"]["quality_xhigh"]["codex_model"])
-            self.assertEqual("xhigh", state["execution_profiles"]["quality_xhigh"]["reasoning_effort"])
+            # 프로필에는 모델명이 없고, 런타임 표 스냅샷이 실제 모델·effort를 든다.
+            self.assertEqual("codex", state["runtime"])
+            self.assertNotIn("codex_model", state["execution_profiles"]["economy_high"])
+            table = state["runtime_model_table"]
+            self.assertEqual({"agent": "study_note_worker", "model": "gpt-5.6-luna", "effort": "high"}, table["economy_high"])
+            self.assertEqual({"agent": "faithful_note_reviewer", "model": "gpt-5.6-sol", "effort": "high"}, table["review_high"])
+            self.assertEqual({"agent": "quality_note_worker", "model": "gpt-5.6-sol", "effort": "high"}, table["quality_high"])
+            self.assertEqual({"agent": "deep_note_reviewer", "model": "gpt-5.6-sol", "effort": "xhigh"}, table["quality_xhigh"])
             self.assertTrue(state["cost_policy"]["terra_enabled"] is False)
 
             self.assertEqual("python", state["roles"]["transcriber"]["execution"]["executor"])
             self.assertEqual("hybrid", state["roles"]["transcript_auditor"]["execution"]["executor"])
             self.assertEqual("subagent", state["roles"]["writer"]["execution"]["executor"])
-            self.assertEqual("economy_high", state["roles"]["writer"]["execution"]["agent_profile"])
-            self.assertEqual("economy_max", state["roles"]["final_reviewer"]["execution"]["agent_profile"])
+            self.assertEqual("quality_high", state["roles"]["writer"]["execution"]["agent_profile"])
+            self.assertEqual("review_high", state["roles"]["final_reviewer"]["execution"]["agent_profile"])
             self.assertEqual("python", state["roles"]["maintainer"]["execution"]["executor"])
 
             deep_result = self.run_cli(
@@ -491,7 +517,8 @@ class ManageRunTests(unittest.TestCase):
             )
             payload = json.loads(dispatch.stdout)
             self.assertEqual("critical-review-1", payload["call_id"])
-            self.assertEqual("gpt-5.6-sol", payload["execution"]["codex_model"])
+            self.assertEqual("codex", payload["execution"]["runtime"])
+            self.assertEqual("gpt-5.6-sol", payload["execution"]["model"])
             self.assertEqual("high", payload["execution"]["reasoning_effort"])
             self.assertEqual(0, payload["remaining_critical_reviews"])
             self.run_cli(
@@ -680,14 +707,14 @@ class ManageRunTests(unittest.TestCase):
 
             state = json.loads(state_file.read_text(encoding="utf-8"))
             self.assertEqual("skipped", state["roles"]["maintainer"]["status"])
-            self.assertEqual(2, state["schema_version"])
+            self.assertEqual(3, state["schema_version"])
             self.assertEqual(1, state["roles"]["final_reviewer"]["max_attempts"])
             premium = state["cost_usage"]["premium_final_reviews"]
             self.assertEqual(1, len(premium))
-            self.assertEqual("faithful_final_luna_max", premium[0]["route"])
-            self.assertEqual("economy_max", premium[0]["profile"])
-            self.assertEqual("gpt-5.6-luna", premium[0]["model"])
-            self.assertEqual("max", premium[0]["reasoning_effort"])
+            self.assertEqual("faithful_final_review_high", premium[0]["route"])
+            self.assertEqual("review_high", premium[0]["profile"])
+            self.assertEqual("gpt-5.6-sol", premium[0]["model"])
+            self.assertEqual("high", premium[0]["reasoning_effort"])
             self.assertEqual("passed", premium[0]["status"])
 
             self.run_cli("verify", str(state_file), "--check-inputs")
@@ -763,7 +790,7 @@ class ManageRunTests(unittest.TestCase):
                 str(coverage),
             )
             state = json.loads(state_file.read_text(encoding="utf-8"))
-            self.assertEqual("economy_max", state["roles"]["final_reviewer"]["coverage_gate"]["reviewer_profile"])
+            self.assertEqual("review_high", state["roles"]["final_reviewer"]["coverage_gate"]["reviewer_profile"])
             coverage.write_text("{}", encoding="utf-8")
             verify = self.run_cli("verify", str(state_file), expected=1)
             self.assertIn("coverage report가 변경되었거나 누락됨", verify.stdout)
@@ -1070,6 +1097,123 @@ class ManageRunTests(unittest.TestCase):
                     self.run_cli(
                         "init", str(inputs), "--lecture-id", bad_id, "--root", str(root), expected=2
                     )
+
+    def test_init_requires_note_mode_and_runtime_when_undetectable(self) -> None:
+        # 제작 모드는 사용자가 골라야 하므로 기본값이 없고, 런타임은 감지 실패 시 명시가 필요하다.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            no_mode = self.run_raw(
+                "init", str(inputs), "--lecture-id", "no-mode", "--root", str(root), "--runtime", "codex",
+                expected=2,
+            )
+            self.assertIn("--note-mode", no_mode.stderr)
+            no_runtime = self.run_raw(
+                "init", str(inputs), "--lecture-id", "no-runtime", "--root", str(root), "--note-mode", "faithful",
+                expected=2,
+                env=runtime_neutral_env(),
+            )
+            self.assertIn("--runtime", no_runtime.stderr)
+            self.assertFalse((root / "workspace" / "no-runtime").exists())
+
+            detected = self.run_raw(
+                "init", str(inputs), "--lecture-id", "detected", "--root", str(root), "--note-mode", "deep",
+                env=runtime_neutral_env(CLAUDECODE="1"),
+            )
+            state = json.loads(Path(detected.stdout.strip()).read_text(encoding="utf-8"))
+            self.assertEqual("claude", state["runtime"])
+            self.assertEqual("claude-sonnet-5", state["runtime_model_table"]["economy_high"]["model"])
+            self.assertEqual("claude-opus-5", state["runtime_model_table"]["quality_xhigh"]["model"])
+
+    def test_claude_runtime_resolves_models_and_verifies_against_snapshot(self) -> None:
+        # 같은 프로필이 Claude에서는 Sonnet/Opus로 해석돼 기록되고, 검증도 그 스냅샷을 기준으로 한다.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli(
+                "init", str(inputs), "--lecture-id", "claude-deep", "--root", str(root),
+                "--runtime", "claude", "--note-mode", "deep",
+            )
+            state_file = Path(result.stdout.strip())
+            next_payload = json.loads(self.run_cli("next", str(state_file)).stdout)
+            self.assertEqual("claude", next_payload["runtime"])
+            mapper = next(item for item in next_payload["ready"] if item["role"] == "source_mapper")
+            self.assertEqual({"model": "claude-sonnet-5", "effort": "high"}, {k: mapper["resolved_profile"][k] for k in ("model", "effort")})
+
+            source_map = self.write_source_map(state_file)
+            for role in ("source_mapper", "writer", "pedagogy_editor", "layout_builder"):
+                artifact = source_map if role == "source_mapper" else state_file.parent / f"{role}.txt"
+                if role != "source_mapper":
+                    artifact.write_text(role, encoding="utf-8")
+                self.run_cli("start", str(state_file), "--role", role)
+                self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
+
+            self.run_cli("start", str(state_file), "--role", "final_reviewer")
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            call = state["cost_usage"]["premium_final_reviews"][0]
+            self.assertEqual({"runtime": "claude", "model": "claude-opus-5", "reasoning_effort": "xhigh", "agent": "deep_note_reviewer"}, {k: call[k] for k in ("runtime", "model", "reasoning_effort", "agent")})
+            artifact = state_file.parent / "final_review.md"
+            artifact.write_text("검수", encoding="utf-8")
+            self.complete_final_review(state_file, artifact, source_map, "deep")
+            self.run_cli("verify", str(state_file))
+
+            # Codex 모델명을 심으면 스냅샷과 어긋나므로 변조로 잡혀야 한다.
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            state["cost_usage"]["premium_final_reviews"][0]["model"] = "gpt-5.6-sol"
+            state_file.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+            tampered = self.run_cli("verify", str(state_file), expected=1)
+            self.assertIn("변조", tampered.stdout)
+
+    def test_claude_escalation_uses_claude_quality_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli(
+                "init", str(inputs), "--lecture-id", "claude-escalate", "--root", str(root), "--runtime", "claude",
+            )
+            state_file = Path(result.stdout.strip())
+            packet = state_file.parent / "packet.json"
+            packet.write_text(
+                json.dumps({"model_input": True, "kind": "review_packet", "target": {"claim": "수치 불명확"}}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            self.run_cli("start", str(state_file), "--role", "source_mapper")
+            dispatch = self.run_cli(
+                "escalate", str(state_file), "--role", "source_mapper", "--packet", str(packet),
+                "--category", "number", "--reason", "핵심 수치 충돌",
+            )
+            payload = json.loads(dispatch.stdout)
+            self.assertEqual("claude", payload["execution"]["runtime"])
+            self.assertEqual("claude-opus-5", payload["execution"]["model"])
+            self.assertEqual("high", payload["execution"]["reasoning_effort"])
+            self.run_cli("status", str(state_file))
+
+    def test_schema_v2_state_gains_runtime_without_duplicating_premium_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli("init", str(inputs), "--lecture-id", "v2-state", "--root", str(root))
+            state_file = Path(result.stdout.strip())
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            state["schema_version"] = 2
+            state.pop("runtime")
+            state.pop("runtime_model_table")
+            state_file.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+            self.run_cli("refresh-inputs", str(state_file))
+            migrated = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(3, migrated["schema_version"])
+            self.assertEqual("codex", migrated["runtime"])
+            self.assertEqual([], migrated["cost_usage"]["premium_final_reviews"])
+            self.run_cli("verify", str(state_file), expected=1)  # 활성 역할 미통과는 그대로 실패
 
     def test_refresh_preserves_manual_role_and_its_dependency(self) -> None:
         # 입력 갱신 뒤에도 수동 활성화한 기술 검수가 조판 선행조건에서 빠지면 안 된다.

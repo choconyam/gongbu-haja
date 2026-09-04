@@ -30,10 +30,10 @@
     - `subagent`: 역할 전체가 아니라 현재 단원·절의 제한된 근거 묶음을 독립 하위 에이전트에 맡긴다.
 11. 각 담당에게 전체 자료가 아니라 역할 프롬프트, 해당 범위의 근거 묶음, 필요한 선행 산출물, 출력 경로를 전달한다.
     - 모든 담당 요청에 실행 상태의 `note_mode`와 `mode_contract`를 포함한다.
-    - 전사 후보 판정·자료 대응·조판 표본처럼 범위가 제한된 반복 의미 작업은 `economy_high`(`gpt-5.6-luna`, `high`)로 호출한다.
-    - `faithful` 집필은 `economy_high`, 독립 최종 누락·왜곡 대조는 `economy_max`(`gpt-5.6-luna`, `max`)로 실행한다.
-    - `deep` 집필·교수 설명 통합·교육 보강·수식 의미 검수는 `quality_high`(`gpt-5.6-sol`, `high`), 완성본 전체의 독립 논리 검수 1회는 `quality_xhigh`(`gpt-5.6-sol`, `xhigh`)로 실행한다.
-    - 최종 Luna `max` 또는 Sol `xhigh` 호출은 `run_state.json`의 현재 `review_cycle`에 시작 전 예약하며 한 번만 허용한다. source map과 조판 산출물의 SHA-256 지문이 과거 호출과 같으면 cycle 번호가 달라도 다시 호출하지 않는다. 검수에서 발견한 국소 문제는 같은 호출 안에서 수정·해당 위치 재확인까지 끝낸다.
+    - 전사 후보 판정·자료 대응·조판 표본처럼 범위가 제한된 반복 의미 작업은 `economy_high`로 호출한다.
+    - `faithful` 집필도 `quality_high`, 독립 최종 누락·왜곡·약화 대조는 `review_high`(상위 모델)로 실행한다. 경량 모델은 전사 후보 판정·자료 대응·조판 표본에만 쓴다.
+    - `deep` 집필·교수 설명 통합·교육 보강·수식 의미 검수는 `quality_high`, 완성본 전체의 독립 논리 검수 1회는 `quality_xhigh`로 실행한다.
+    - 최종 `review_high` 또는 `quality_xhigh` 호출은 `run_state.json`의 현재 `review_cycle`에 시작 전 예약하며 한 번만 허용한다. source map과 조판 산출물의 SHA-256 지문이 과거 호출과 같으면 cycle 번호가 달라도 다시 호출하지 않는다. 검수에서 발견한 국소 문제는 같은 호출 안에서 수정·해당 위치 재확인까지 끝낸다.
     - 전사 검수 입력은 `../scripts/select_review_packets.py`가 manifest를 로컬에서 조회해 총 16KiB 안에서 고른 개별 패킷만 사용한다. aggregate 후보·색인·manifest는 모델에 넘기지 않는다.
     - 숫자·고유명사·수식·평가조건·근거 충돌·논리 또는 유도 공백이 남았을 때만 `model_input=true`인 16KiB 이하 개별 패킷을 `manage_run.py escalate`에 통과시킨다. 명령이 반환한 현재 모드의 `quality_high` 또는 `quality_xhigh` 프로필을 강의당 한 번만 사용하고 임의 모델로 바꾸지 않는다.
 12. 실제 Python 단계 또는 담당 에이전트를 시작·통과·실패 처리할 때마다 `../scripts/manage_run.py`에 상태와 산출물을 기록한다.
@@ -80,7 +80,7 @@
 - 같은 전체 원자료와 전체 대화 기록을 여러 담당 에이전트에게 반복 전달하지 않는다.
 - Python으로 확정 가능한 추출·분할·검색·계산·빌드·해시·구조 검사를 모델에 맡기지 않는다.
 - PDF에서 자동 수집한 단어 후보를 최종 전문용어로 간주하거나, 문자열 유사도만으로 전사를 자동 치환하지 않는다.
-- 모든 역할을 Sol, `xhigh` 또는 `max` 같은 고비용 설정으로 일괄 실행하지 않는다.
+- 모든 역할을 `quality_*` 프로필이나 `xhigh`·`max` effort 같은 고비용 설정으로 일괄 실행하지 않는다.
 - 실제 모델 프로세스를 배정하지 않은 역할을 실행 완료로 보고하지 않는다.
 
 ## 완료 조건

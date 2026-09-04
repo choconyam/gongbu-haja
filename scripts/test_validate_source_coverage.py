@@ -34,7 +34,7 @@ class ValidateSourceCoverageTests(unittest.TestCase):
             "kind": "study_note_source_coverage",
             "schema_version": 1,
             "note_mode": mode,
-            "reviewer_profile": "economy_max" if mode == "faithful" else "quality_xhigh",
+            "reviewer_profile": "review_high" if mode == "faithful" else "quality_xhigh",
             "items": [
                 {"source_unit_id": "slide-1", "decision": "included", "note_refs": ["sec-1"]},
                 {"source_unit_id": "slide-2", "decision": "merged", "note_refs": ["sec-1", "sec-2"]},

@@ -25,10 +25,10 @@ Use these as evidence-based gates, not as a demand that every note contain every
 
 - The run state records exactly one production mode: `faithful` or `deep`.
 - In `faithful`, claims and explanations stay within the handout, reviewed instructor explanation, and user-designated sources; unnecessary background, new examples, and new derivations are absent.
-- In `faithful`, an independent Luna `max` coverage review compares every source unit with the final note after Luna `high` drafting.
+- In `faithful`, an independent `review_high` coverage review compares every source unit with the final note after `economy_high` drafting.
 - In `deep`, important prerequisite ideas, intermediate reasoning, derivation steps, assumptions, and application conditions are present where they are needed for understanding.
 - Supplemental material in `deep` is verified and visibly distinguishable from source material.
-- In `deep`, an independent Sol `xhigh` review reads the completed note once after Sol `high` authoring and checks global logic, prerequisite links, derivation continuity, assumptions, and application conditions.
+- In `deep`, an independent `quality_xhigh` review reads the completed note once after `quality_high` authoring and checks global logic, prerequisite links, derivation continuity, assumptions, and application conditions.
 - A mode change reused unchanged transcription and source mapping while rerunning writer and downstream roles only.
 
 ### Recording and transcript quality, when applicable

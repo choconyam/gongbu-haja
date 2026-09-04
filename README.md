@@ -27,7 +27,7 @@
 | **자료 충실형** (`faithful`) | “자료 충실형으로 빠르게 정리해줘” | 교안과 검수된 교수 설명만 압축해 암기하기 좋게 정리한다. 외부 배경지식·새 유도는 기본적으로 넣지 않아 빠르고 모델 사용량이 적다. |
 | **심화 이해형** (`deep`) | “심화 이해형으로 배경과 연결 과정까지 설명해줘” | 과목 분야와 관계없이 필요한 배경 맥락, 인과관계, 중간 사고, 유도 과정, 예시와 적용 조건을 검증해 보강한다. |
 
-새 학습노트 요청에서 모드를 말하지 않으면 에이전트는 작업을 시작하기 전에 항상 두 모드를 제시하고 선택을 받는다. 자료 특성에 맞는 모드를 추천할 수는 있지만 과목 계열만으로 결정하지 않는다. 명령행 자동화의 안전한 기본값은 `faithful`이다. 어느 모드든 전사와 PDF 추출은 로컬에서 한 번만 수행하며, 전체 원시 전사를 역할마다 반복 전달하지 않는다.
+새 학습노트 요청에서 모드를 말하지 않으면 에이전트는 작업을 시작하기 전에 항상 두 모드를 제시하고 선택을 받는다. 자료 특성에 맞는 모드를 추천할 수는 있지만 과목 계열만으로 결정하지 않는다. 명령행 초기화의 `--note-mode`는 필수 인자라, 모드를 정하지 않으면 실행 상태를 만들 수 없다. 어느 모드든 전사와 PDF 추출은 로컬에서 한 번만 수행하며, 전체 원시 전사를 역할마다 반복 전달하지 않는다.
 
 ## 처음이라면 — 하나씩 따라 하기
 
@@ -244,13 +244,13 @@ Python 통과는 내용이 좋다는 뜻이 아니다. 자동 검사는 기계�
 
 - 추출·전사·해시·이상 후보 탐지·문맥 절단·계산·빌드·구조 검사는 먼저 로컬 Python이 처리한다.
 - 의미 판단은 전체 자료가 아니라 Python이 만든 작은 근거 패킷을 하위 에이전트에 맡긴다.
-- `faithful`은 Luna `high`로 집필하고, 별도 Luna `max`가 모든 source unit의 누락·왜곡·중복을 최종 대조한다.
-- `deep`은 Sol `high`로 집필·설명 보강하고, 별도 Sol `xhigh`가 완성본 전체의 논리·유도·설명 연결을 한 번 검수한다.
-- 최종 Luna `max`/Sol `xhigh` 호출은 상태 파일의 현재 `review_cycle`에서 한 번만 예약된다. source map과 완성본 지문이 같으면 cycle 번호만 바꿔 재호출할 수도 없다. 검수 중 발견한 국소 문제는 같은 호출 안에서 수정하고 바뀐 위치만 재확인한다.
-- Terra와 Sol `max`는 기본 경로에 두지 않는다. 고강도 모델은 작성·최종 검수 또는 16KiB 이하의 실제 미해결 패킷에만 사용하며, 역할 전체 자동 재시도는 하지 않는다.
+- `faithful`도 `quality_high`(상위 모델)로 집필하고, 별도 `review_high`(상위 모델 `high`)가 모든 source unit의 누락·왜곡·약화를 최종 대조한다. 경량 모델은 전사 검수·자료 대응·조판에만 쓴다 — 실전 A/B에서 경량 집필이 교수 설명을 축약해 재작업을 불렀기 때문이다.
+- `deep`은 `quality_high`로 집필·설명 보강하고, 별도 `quality_xhigh`가 완성본 전체의 논리·유도·설명 연결을 한 번 검수한다.
+- 최종 `review_high`/`quality_xhigh` 호출은 상태 파일의 현재 `review_cycle`에서 한 번만 예약된다. source map과 완성본 지문이 같으면 cycle 번호만 바꿔 재호출할 수도 없다. 검수 중 발견한 국소 문제는 같은 호출 안에서 수정하고 바뀐 위치만 재확인한다.
+- 표에 없는 상위 모델은 기본 경로에 두지 않는다. 고강도 모델은 작성·최종 검수 또는 16KiB 이하의 실제 미해결 패킷에만 사용하며, 역할 전체 자동 재시도는 하지 않는다.
 - 동시에 실행하는 하위 에이전트는 최대 2개다. 병렬화 때문에 같은 원자료를 여러 번 입력하지 않는다.
 
-Codex용 기본값은 `.codex/config.toml`과 네 개의 프로젝트 역할 프로필에 들어 있다. 다른 에이전트 런타임은 `rules/orchestration.md`의 `local_python`, `economy_high`, `economy_max`, `quality_high`, `quality_xhigh` 의도를 각 제품의 모델에 대응시킨다.
+런타임별 모델표는 `scripts/execution_profiles.py` 한 곳에 있다(현재 Codex는 Luna/Sol, Claude Code는 Sonnet 5/Opus 5를 전체 ID로 고정 — 새 모델은 검증 후 표를 갱신해야 적용). `.codex/`(설정과 역할 TOML 4개)와 `.claude/agents/`(서브 에이전트 4개)는 `scripts/sync_runtime_agents.py`가 그 표에서 생성하므로 직접 고치지 않는다. `manage_run.py init`은 실행 런타임을 환경에서 감지해(감지 실패 시 `--runtime codex|claude` 명시) 그 표의 스냅샷을 상태에 기록하고, 이후 `next`·`escalate`가 프로필을 실제 모델·effort로 해석해 돌려준다. 두 런타임의 등급은 대응이지 등가가 아니다.
 
 ## 입력
 
@@ -284,7 +284,8 @@ Codex용 기본값은 `.codex/config.toml`과 네 개의 프로젝트 역할 프
 
 ```text
 gongbu-haja/
-├─ .codex/                      Codex용 저비용 하위 에이전트 기본값·역할 프로필
+├─ .codex/                      Codex용 하위 에이전트 설정·역할 선언 4개(모델표에서 생성)
+├─ .claude/agents/              Claude Code용 서브 에이전트 선언 4개(모델표에서 생성)
 ├─ AGENTS.md                    저장소 관리자 에이전트 진입 지침
 ├─ CLAUDE.md                    Claude Code 사용자를 AGENTS.md로 연결
 ├─ SKILL.md                     스킬 진입점(부트스트랩) — skills/ 사본과 동일 유지
@@ -352,7 +353,7 @@ python scripts/manage_run.py start workspace/<강의ID>/run_state.json `
   --repair-packet "workspace/<강의ID>/review/repair_packet.json"
 ```
 
-국소 고강도 검수가 필요하면 첫 의미 작업에서 남은 핵심 항목의 개별 패킷만 다음 게이트에 통과시킨다. 한 강의에서 두 번째 요청, 16KiB 초과 파일, `model_input=true`·`kind=*packet`·명시적 target 계약을 지키지 않은 파일, 역할과 맞지 않는 오류 분류는 거부된다. 실제 모델은 현재 모드와 역할에 따라 Sol `high` 또는 `xhigh`로 반환된다.
+국소 고강도 검수가 필요하면 첫 의미 작업에서 남은 핵심 항목의 개별 패킷만 다음 게이트에 통과시킨다. 한 강의에서 두 번째 요청, 16KiB 초과 파일, `model_input=true`·`kind=*packet`·명시적 target 계약을 지키지 않은 파일, 역할과 맞지 않는 오류 분류는 거부된다. 실제 모델·effort는 현재 모드와 역할에 따라 `quality_high` 또는 `quality_xhigh` 프로필을 런타임 모델표로 해석해 반환된다.
 
 ```powershell
 python scripts/manage_run.py escalate workspace/<강의ID>/run_state.json `
@@ -553,7 +554,7 @@ SRT는 타임스탬프 기준 원시 전사, TXT는 검색용 원문, Markdown�
 
 ```powershell
 python scripts/validate_agent_setup.py --strict
-python -m unittest scripts.test_manage_run scripts.test_validate_note_output scripts.test_record_lecture scripts.test_transcribe_lecture scripts.test_transcribe_batch scripts.test_prepare_transcript_review scripts.test_select_review_packets scripts.test_apply_transcript_corrections
+python -m unittest discover -s scripts -p "test_*.py"
 ```
 
 전사 패키지:
@@ -590,3 +591,9 @@ python -m pip install -r requirements-transcription.txt
 ## 라이선스
 
 MIT — 저장소의 `LICENSE` 파일을 참조한다.
+
+---
+
+<p align="center">
+  <img src="assets/chwi-ppo.jpg" alt="chwi-ppo! — 노트 다 만들었으면 취뽀 가자" width="640">
+</p>
