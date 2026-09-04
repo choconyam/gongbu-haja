@@ -28,7 +28,8 @@ dependencies = []
 [project.optional-dependencies]
 recording = ["PyAudioWPatch>=0.2.12.7,<0.3"]
 transcription = ["faster-whisper==1.2.1", "pypdf>=5.0"]
-all = ["PyAudioWPatch>=0.2.12.7,<0.3", "faster-whisper==1.2.1", "pypdf>=5.0"]
+pdf = ["reportlab>=4.0", "pypdf>=5.0"]
+all = ["PyAudioWPatch>=0.2.12.7,<0.3", "faster-whisper==1.2.1", "pypdf>=5.0", "reportlab>=4.0"]
 
 [project.urls]
 Homepage = "https://github.com/choconyam/gongbu-haja"

@@ -101,11 +101,11 @@ input/2026-03-10_과목A 자료로 자료 충실형 학습노트 만들어줘
 
 ```bash
 python -m pip install --user pipx && python -m pipx ensurepath
-pipx install "gongbu-haja[recording,transcription] @ git+https://github.com/choconyam/gongbu-haja"
+pipx install "gongbu-haja[recording,transcription,pdf] @ git+https://github.com/choconyam/gongbu-haja"
 gongbu setup-agents
 ```
 
-- `[recording]`은 Windows 온라인 강의 녹음, `[transcription]`은 로컬 Whisper 전사용 선택 의존성이다. 둘 다 필요 없으면 `pipx install "gongbu-haja @ git+https://github.com/choconyam/gongbu-haja"`.
+- `[recording]`은 Windows 온라인 강의 녹음, `[transcription]`은 로컬 Whisper 전사, `[pdf]`는 PDF 조판(reportlab)용 선택 의존성이다. 둘 다 필요 없으면 `pipx install "gongbu-haja @ git+https://github.com/choconyam/gongbu-haja"`.
 - `gongbu setup-agents`는 `~/.claude/agents/`와 `~/.codex/agents/`에 서브 에이전트 선언 4개를 설치한다. `~/.codex/config.toml`은 `[agents]` 절이 없을 때만 끝에 덧붙이고, 이미 있으면 손대지 않고 맞출 값만 알려준다.
 
 그 다음은 과목 폴더에서 한다. 과목 폴더 하나가 자기 자료·녹음·상태·노트를 전부 갖고, 다른 과목과 섞이지 않는다.
