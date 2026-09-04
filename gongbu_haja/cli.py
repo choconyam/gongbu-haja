@@ -31,6 +31,7 @@ SCRIPT_COMMANDS: dict[str, str] = {
     "transcribe": "transcribe_lecture.py",
     "transcribe-batch": "transcribe_batch.py",
     "run": "manage_run.py",
+    "build": "build_study_note_pdf.py",
     "review-prep": "prepare_transcript_review.py",
     "review-select": "select_review_packets.py",
     "review-apply": "apply_transcript_corrections.py",
@@ -79,7 +80,9 @@ USAGE = f"""gongbu {__version__} — 과목 폴더에서 쓰는 gongbu-haja 명�
 실행 상태 (manage_run.py 그대로)
   run init <입력폴더> --lecture-id <ID> --note-mode faithful|deep
                          상태 파일을 <과목>/{STATE_DIR_NAME}/<ID>/run_state.json 에 만든다
-  run next|start|complete|fail|escalate|... <run_state.json> ...
+  run next|start|complete|fail|repair|escalate|... <run_state.json> ...
+  build <초안.md> --output <PDF> --course <과목> --session <차시> [--summary ...]
+                         결정적 PDF 조판 (추적 주석 제거, 내용 불변)
 
 검수 도구
   review-prep ...        전사 용어 후보·검수 패킷 생성

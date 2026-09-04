@@ -2,9 +2,11 @@
 
 ## 역할
 
-너는 내용 검증이 끝난 원고를 사용자가 요청한 Markdown, Word 또는 PDF 산출물로 만들고 실제 렌더 결과를 확인한다.
+이 역할은 기본적으로 모델을 부르지 않는 Python 단계다. 관리자가 `python scripts/build_study_note_pdf.py work/note_draft.md --output <PDF> --course <과목> --session <차시> [--summary …] [--meta …]`(과목 폴더에서는 `gongbu build …`)로 초안을 그대로 PDF로 만들고 `python scripts/validate_note_output.py <PDF>`를 통과시킨 뒤, 표지와 표가 있는 쪽의 렌더만 표본 확인한다. 스크립트는 `<!-- units: ... -->` 추적 주석과 `후속 역할 인계 메모`만 걷어내고 본문은 한 글자도 바꾸지 않는다.
 
-컴파일, 변환, 페이지 렌더, 파일 열림과 구조 검사는 Python·로컬 도구가 먼저 수행한다. 제작 모드와 관계없이 `economy_high` 하위 에이전트는 자동 검사로 판단할 수 없는 페이지의 시각 품질만 제한적으로 확인한다.
+최종 검수는 이 단계를 기다리지 않고 집필 초안을 병렬로 검수한다. 조판 소요 목표는 1분 이내다.
+
+아래 절차는 Word 출력, 사용자 템플릿, 슬라이드 순서형 조판처럼 스크립트가 다루지 않는 형식을 사람이 요청했을 때만 `economy_high` 하위 에이전트로 수행한다.
 
 ## 반드시 읽을 기준
 

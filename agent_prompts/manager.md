@@ -30,14 +30,17 @@
     - `subagent`: 역할 전체가 아니라 현재 단원·절의 제한된 근거 묶음을 독립 하위 에이전트에 맡긴다.
 11. 각 담당에게 전체 자료가 아니라 역할 프롬프트, 해당 범위의 근거 묶음, 필요한 선행 산출물, 출력 경로를 전달한다.
     - 모든 담당 요청에 실행 상태의 `note_mode`와 `mode_contract`를 포함한다.
-    - 전사 후보 판정·자료 대응·조판 표본처럼 범위가 제한된 반복 의미 작업은 `economy_high`로 호출한다.
+    - 전사 후보 판정·자료 대응처럼 범위가 제한된 반복 의미 작업은 `economy_high`로 호출한다. 조판은 모델을 부르지 않는다: `python scripts/build_study_note_pdf.py work/note_draft.md --output <PDF> --course <과목> --session <차시>`(과목 폴더에서는 `gongbu build ...`)로 빌드하고 `../scripts/validate_note_output.py`를 통과시킨 뒤 표지·표가 있는 쪽 렌더만 표본 확인한다.
+    - `writer`가 통과하면 `layout_builder`와 `final_reviewer`가 동시에 `ready`가 된다. 조판을 돌리면서 바로 최종 검수를 시작한다(검수 대상은 추적 주석이 있는 work/note_draft.md).
+    - 학습노트 한 편의 목표 소요는 전사 제외 10~15분이다: 집필(quality_high) 5~7분, 조판 1분 이내, 검수(review_high) 5~7분이 병렬로 겹친다. 검수 반려는 위 13의 경로로 한 번에 처리하고, 두 번째 반려부터는 남은 결함을 사용자에게 보고한다.
     - `faithful` 집필도 `quality_high`, 독립 최종 누락·왜곡·약화 대조는 `review_high`(상위 모델)로 실행한다. 경량 모델은 전사 후보 판정·자료 대응·조판 표본에만 쓴다.
     - `deep` 집필·교수 설명 통합·교육 보강·수식 의미 검수는 `quality_high`, 완성본 전체의 독립 논리 검수 1회는 `quality_xhigh`로 실행한다.
-    - 최종 `review_high` 또는 `quality_xhigh` 호출은 `run_state.json`의 현재 `review_cycle`에 시작 전 예약하며 한 번만 허용한다. source map과 조판 산출물의 SHA-256 지문이 과거 호출과 같으면 cycle 번호가 달라도 다시 호출하지 않는다. 검수에서 발견한 국소 문제는 같은 호출 안에서 수정·해당 위치 재확인까지 끝낸다.
+    - 최종 `review_high` 또는 `quality_xhigh` 호출은 `run_state.json`의 현재 `review_cycle`에 시작 전 예약하며 한 번만 허용한다. source map과 집필 초안의 SHA-256 지문이 과거 호출과 같으면 cycle 번호가 달라도 다시 호출하지 않는다. 검수에서 발견한 국소 문제는 같은 호출 안에서 수정·해당 위치 재확인까지 끝낸다.
     - 전사 검수 입력은 `../scripts/select_review_packets.py`가 manifest를 로컬에서 조회해 총 16KiB 안에서 고른 개별 패킷만 사용한다. aggregate 후보·색인·manifest는 모델에 넘기지 않는다.
     - 숫자·고유명사·수식·평가조건·근거 충돌·논리 또는 유도 공백이 남았을 때만 `model_input=true`인 16KiB 이하 개별 패킷을 `manage_run.py escalate`에 통과시킨다. 명령이 반환한 현재 모드의 `quality_high` 또는 `quality_xhigh` 프로필을 강의당 한 번만 사용하고 임의 모델로 바꾸지 않는다.
 12. 실제 Python 단계 또는 담당 에이전트를 시작·통과·실패 처리할 때마다 `../scripts/manage_run.py`에 상태와 산출물을 기록한다.
 13. 검수 실패나 출력 형식 변경은 전체를 다시 돌리지 않는다. 입력이 같고 사용자가 새 편집을 요청했거나 출력 계약이 바뀌었으면 `python scripts/manage_run.py rerun ... --role <역할> --change-kind user_request|output_contract`로 가장 이른 영향 역할과 후속 단계만 재호출한다. 실패 복구에 `rerun`을 사용하지 않는다.
+    - 최종 검수가 **수정 필요**를 냈을 때: 검수가 같은 호출 안에서 초안을 국소 패치했으면 `complete --role final_reviewer ... --patched <초안 파일>`로 새 해시를 기록하고 조판만 다시 빌드한다. 패치로 끝나지 않으면 `python scripts/manage_run.py repair ... --reopen writer --reason <한 줄> --findings <검수 보고서>`로 집필 이후를 다시 열고(강의당 2회), 집필은 검수 보고의 위치만 국소 수정한 뒤 새 cycle에서 검수를 한 번 더 받는다. 상태 파일을 지우고 다시 `init`하지 않는다.
     - 제작 모드가 바뀌면 `python scripts/manage_run.py set-mode ... --note-mode faithful|deep`를 사용해 전사·자료 매핑을 보존하고 집필 이후만 다시 연다.
     - 역할 전체 재시도는 기본 0회다. 실패한 페이지·절·전사 구간만 직접 근거를 보강한 `model_input=true` 16KiB 이하 JSON으로 최대 한 번 수정한다.
 14. 자동으로 활성화된 조건부 역할이 불필요하다고 확인되면 이유를 기록해 `deactivate`하고, 상태 JSON을 직접 편집하지 않는다.

@@ -363,6 +363,8 @@ def validate(root: Path) -> Report:
         "test_execution_profiles.py",
         "test_sync_runtime_agents.py",
         "test_gongbu_cli.py",
+        "test_build_study_note_pdf.py",
+        "build_study_note_pdf.py",
         "execution_profiles.py",
         "sync_runtime_agents.py",
         "project_types.py",

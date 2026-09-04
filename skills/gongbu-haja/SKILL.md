@@ -9,7 +9,7 @@ description: |
   become the input.
 license: MIT
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
 ---
 
 # gongbu-haja (공부하자)
@@ -45,7 +45,7 @@ git clone https://github.com/choconyam/gongbu-haja "$HOME/gongbu-haja"
 
 `manage_run.py next`의 실행 계약에 따라 추출·전사·후보 탐지·문맥 절단·해시·빌드·구조 검사는 로컬 Python으로 먼저 처리한다. 의미 역할은 전체 대화나 전체 원자료를 넘기지 않은 하위 에이전트에 맡긴다. `faithful`은 `quality_high` 집필과 독립 `review_high`(상위 모델 `high`) 누락 검수를, `deep`은 `quality_high` 집필·보강과 독립 `quality_xhigh` 완성본 논리 검수를 사용한다. 표에 없는 상위 모델은 기본 경로에 두지 않으며, `manage_run.py escalate`는 16KiB 이하의 실제 미해결 패킷 하나만 강의당 한 번 허용한다. 다른 런타임은 같은 비용·품질 의도를 지원 모델에 대응시킨다.
 
-최종 `review_high` 또는 `quality_xhigh` 호출은 상태 파일의 현재 `review_cycle`에서 한 번만 예약한다. 발견한 국소 문제는 같은 호출 안에서 수정·해당 위치 재확인까지 끝내며, 실패 복구를 이유로 같은 완성본 전체를 다시 호출하지 않는다.
+최종 `review_high` 또는 `quality_xhigh` 호출은 상태 파일의 현재 `review_cycle`에서 한 번만 예약한다. 발견한 국소 문제는 같은 호출 안에서 수정·해당 위치 재확인까지 끝내고 `complete --patched`로 기록하며, 실패 복구를 이유로 같은 완성본 전체를 다시 호출하지 않는다. 집필을 다시 열어야 하는 반려는 `manage_run.py repair --reopen writer`(강의당 2회)로 처리하고 상태 파일을 지우지 않는다. 조판은 `build_study_note_pdf.py`(`gongbu build`)로 모델 없이 만들고 최종 검수와 병렬로 돌린다.
 
 최종 검수는 Python source map의 모든 `source_unit_id`를 `included`, `merged`, 이유 있는 `excluded`, 노트 위치가 표시된 `unresolved` 중 하나로 정확히 한 번 처리한 coverage report를 남긴다. `scripts/validate_source_coverage.py`와 `manage_run.py complete --source-map ... --coverage-report ...`가 통과하기 전에는 완료로 보고하지 않는다.
 

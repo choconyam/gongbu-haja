@@ -94,6 +94,8 @@ COST_POLICY = {
     "full_role_retries": 0,
     "targeted_repairs": 1,
     "targeted_escalations": 1,
+    # 최종 검수가 반려한 내용 결함을 고치려고 집필 이후 역할을 다시 여는 횟수(강의당).
+    "review_repairs": 2,
     "premium_final_reviews_per_cycle": 1,
     "max_agent_packet_bytes": 16 * 1024,
     "rule": "결정적 누락 게이트 뒤 모드별 작성·검수를 한 번 실행하고 실패 범위만 국소 재검수",
@@ -103,6 +105,7 @@ MAX_REPAIR_SCOPE_CHARS = 240
 MAX_AGENT_PACKET_BYTES = int(COST_POLICY["max_agent_packet_bytes"])
 CRITICAL_REVIEW_LIMIT = int(COST_POLICY["targeted_escalations"])
 PREMIUM_FINAL_REVIEW_LIMIT = int(COST_POLICY["premium_final_reviews_per_cycle"])
+REVIEW_REPAIR_LIMIT = int(COST_POLICY["review_repairs"])
 CRITICAL_REVIEW_CATEGORIES = (
     "number",
     "proper_noun",
@@ -248,12 +251,15 @@ def role_execution_policy(note_mode: str) -> dict[str, dict[str, Any]]:
             "scope": "지정된 절의 이해 흐름과 필요한 중간 사고만 보강",
         },
         "layout_builder": {
-            "executor": "hybrid",
+            # 조판은 내용을 바꾸지 않는 결정적 작업이다. scripts/build_study_note_pdf.py로
+            # 빌드하고 validate_note_output.py로 검사하며, 렌더 표본은 관리자가 확인한다.
+            # 그래서 final_reviewer는 조판을 기다리지 않고 집필 초안을 바로 검수한다.
+            "executor": "python",
             "primary_profile": "local_python",
-            "agent_profile": "economy_high",
-            "repair_profile": "economy_high",
+            "agent_profile": None,
+            "repair_profile": "local_python",
             "escalation_profile": None,
-            "scope": "Python 빌드·렌더·구조 검사 뒤 필요한 페이지만 시각 검수",
+            "scope": "scripts/build_study_note_pdf.py 결정적 빌드·구조 검사·렌더 표본 확인",
         },
         "final_reviewer": {
             "executor": "subagent",
@@ -335,6 +341,8 @@ def new_cost_usage() -> dict[str, Any]:
         "critical_reviews": [],
         "premium_final_review_limit_per_cycle": PREMIUM_FINAL_REVIEW_LIMIT,
         "premium_final_reviews": [],
+        "review_repair_limit": REVIEW_REPAIR_LIMIT,
+        "review_repairs": [],
     }
 
 
@@ -581,14 +589,15 @@ def make_roles(
         if roles[role]["active"]:
             layout_dependencies.append(role)
     roles["layout_builder"] = role_entry(True, f"{output_format} 최종 형식 생성", layout_dependencies)
-    roles["final_reviewer"] = role_entry(True, "독립 최종 검수", ["layout_builder"])
+    # 최종 검수는 집필 초안(추적 주석 포함)을 대상으로 하며 조판과 병렬로 돈다.
+    roles["final_reviewer"] = role_entry(True, "독립 최종 검수", list(layout_dependencies))
     # 완성본 전체를 읽는 고비용 검수는 한 review cycle에 정확히 한 번만 실행한다.
     # 발견된 문제는 같은 호출 안에서 국소 수정·해당 위치 재확인까지 끝낸다.
     roles["final_reviewer"]["max_attempts"] = 1
     roles["maintainer"] = role_entry(
         False,
         "복수 최종 파일의 이동·패키징·전달 정리가 필요할 때만 활성화",
-        ["final_reviewer"],
+        ["layout_builder", "final_reviewer"],
     )
 
     execution_policy = role_execution_policy(note_mode)
@@ -634,8 +643,8 @@ def normalize_dependencies(roles: dict[str, dict[str, Any]]) -> None:
         for role in ("instructor_integrator", "formula_code_checker", "pedagogy_editor")
         if roles[role]["active"]
     ]
-    roles["final_reviewer"]["dependencies"] = ["layout_builder"]
-    roles["maintainer"]["dependencies"] = ["final_reviewer"]
+    roles["final_reviewer"]["dependencies"] = list(roles["layout_builder"]["dependencies"])
+    roles["maintainer"]["dependencies"] = ["layout_builder", "final_reviewer"]
 
 
 def apply_role_overrides(
@@ -1464,7 +1473,8 @@ def final_review_input_fingerprint(state: dict[str, Any]) -> str:
     """완성본 검수의 실제 의미 입력을 경로와 무관한 SHA-256으로 묶는다."""
 
     evidence: list[dict[str, Any]] = []
-    for role in ("source_mapper", "layout_builder"):
+    # 검수 대상은 집필 초안이다. 조판은 내용을 바꾸지 않으므로 지문에 넣지 않는다.
+    for role in ("source_mapper", "writer"):
         entry = state["roles"][role]
         if entry.get("status") != "passed" or not entry.get("artifacts"):
             raise RunError(f"최종 검수 지문을 만들 선행 산출물이 없습니다: {role}")
@@ -1701,6 +1711,108 @@ def locked_refresh_inputs(args: argparse.Namespace, state_file: Path) -> int:
     return 0
 
 
+def upstream_roles(roles: dict[str, dict[str, Any]], role: str) -> set[str]:
+    """role이 직·간접으로 의존하는 선행 역할 집합."""
+    seen: set[str] = set()
+    queue = list(roles[role]["dependencies"])
+    while queue:
+        current = queue.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        queue.extend(roles[current]["dependencies"])
+    return seen
+
+
+def reopen_role(entry: dict[str, Any], reason: str) -> None:
+    """통과한 역할을 다시 연다. 선행 관계와 활성 여부는 그대로 두고 실행 기록만 비운다."""
+    entry["status"] = "blocked"
+    entry["started_at"] = None
+    entry["completed_at"] = None
+    entry["artifacts"] = []
+    entry["failure_reason"] = reason
+    entry["attempts"] = 0
+    entry["repair_scope"] = None
+    entry["repair_packet"] = None
+    entry["active_profile"] = None
+    entry["critical_review_call_id"] = None
+    entry["premium_call_id"] = None
+    entry["coverage_gate"] = None
+    entry["rerun_count"] = entry.get("rerun_count", 0) + 1
+
+
+def command_repair(args: argparse.Namespace) -> int:
+    """최종 검수가 반려한 내용 결함을 고치려고 선행 역할을 다시 연다.
+
+    rerun은 사용자 요청·출력 계약 변경용이고 실패 상태에서는 거부되므로, 검수 반려 뒤의
+    수정에는 이 명령을 쓴다. 반려한 검수를 실패로 기록하고, 고칠 역할과 그 후속 단계를
+    다시 연 뒤 review_cycle을 올려 새 검수 1회를 허용한다. 강의당 횟수 제한이 있다.
+    """
+
+    state_file = args.state.expanduser().resolve()
+    with state_write_lock(state_file):
+        state = read_state(state_file)
+        reviewer = get_role(state, args.from_role)
+        if reviewer["status"] not in {"running", "failed"}:
+            raise RunError(
+                f"검수가 실행 중이거나 실패한 상태에서만 반려 수정을 열 수 있습니다: "
+                f"{args.from_role}={reviewer['status']}"
+            )
+        target = get_role(state, args.reopen)
+        if not target["active"] or target["status"] != "passed":
+            raise RunError(f"통과한 활성 역할만 다시 열 수 있습니다: {args.reopen}={target['status']}")
+        if args.reopen not in upstream_roles(state["roles"], args.from_role):
+            raise RunError(
+                f"{args.reopen}은(는) {args.from_role}의 선행 역할이 아닙니다. "
+                "조판만 다시 만들 때는 rerun --change-kind output_contract 를 사용하십시오."
+            )
+        reason = args.reason.strip()
+        if not reason or len(reason) > MAX_REPAIR_SCOPE_CHARS or "\n" in reason or "\r" in reason:
+            raise RunError(f"반려 수정 이유는 한 줄 {MAX_REPAIR_SCOPE_CHARS}자 이하여야 합니다.")
+        usage = state.setdefault("cost_usage", new_cost_usage())
+        repairs = usage.setdefault("review_repairs", [])
+        limit = int(usage.get("review_repair_limit", REVIEW_REPAIR_LIMIT))
+        if limit != REVIEW_REPAIR_LIMIT:
+            raise RunError("실행 상태의 검수 반려 수정 제한값이 프로젝트 정책과 일치하지 않습니다.")
+        if len(repairs) >= limit:
+            raise RunError(
+                f"이 강의의 검수 반려 수정 {limit}회를 이미 사용했습니다. 남은 결함은 미해결로 사용자에게 보고하십시오."
+            )
+        findings_record = None
+        if args.findings:
+            findings_record = artifact_record(resolve_artifact(args.findings, state_file))
+        if reviewer["status"] == "running":
+            if args.from_role == "final_reviewer":
+                finish_premium_final_review(state, reviewer, "failed")
+            finish_critical_review(state, reviewer, "failed")
+            reviewer["status"] = "failed"
+            reviewer["failure_reason"] = reason
+            reviewer["completed_at"] = now_iso()
+            append_event(state, "failed", args.from_role, reason)
+        invalidate_downstream(state["roles"], args.reopen)
+        reopen_role(target, f"검수 반려 수정: {reason}")
+        refresh_statuses(state["roles"])
+        cycle = advance_review_cycle(state, f"검수 반려 수정: {args.from_role} → {args.reopen}")
+        repairs.append(
+            {
+                "call_id": f"review-repair-{len(repairs) + 1}",
+                "at": now_iso(),
+                "from_role": args.from_role,
+                "reopened_role": args.reopen,
+                "reason": reason,
+                "findings": findings_record,
+                "review_cycle": cycle,
+            }
+        )
+        append_event(state, "review_repair", args.reopen, f"{args.from_role} 반려 → {args.reopen} 재개: {reason}")
+        save_state(state_file, state)
+        print(
+            f"반려 수정 예약: {args.reopen} 재개 | review_cycle {cycle} | "
+            f"남은 반려 수정 {limit - len(repairs)}회 | {reason}"
+        )
+        return 0
+
+
 def command_rerun(args: argparse.Namespace) -> int:
     """입력을 바꾸지 않고 선택 역할과 후속 역할만 다시 실행한다."""
 
@@ -1717,8 +1829,9 @@ def command_rerun(args: argparse.Namespace) -> int:
         ]
         if failed:
             raise RunError(
-                "실패 복구에는 rerun을 사용할 수 없습니다. 실패한 범위의 국소 수정으로 "
-                f"처리하거나 사용자에게 중단 상태를 보고하십시오: {', '.join(failed)}"
+                "실패 복구에는 rerun을 사용할 수 없습니다. 실패한 범위의 국소 수정으로 처리하거나, "
+                "최종 검수가 반려한 내용 결함이면 repair --reopen <역할> 로 선행 역할을 다시 열고, "
+                f"그 밖에는 사용자에게 중단 상태를 보고하십시오: {', '.join(failed)}"
             )
         if args.role == "final_reviewer":
             raise RunError(
@@ -1733,19 +1846,7 @@ def command_rerun(args: argparse.Namespace) -> int:
             raise RunError(f"통과한 역할만 선택 재실행할 수 있습니다: {args.role}={entry['status']}")
 
         invalidate_downstream(state["roles"], args.role)
-        entry["status"] = "blocked"
-        entry["started_at"] = None
-        entry["completed_at"] = None
-        entry["artifacts"] = []
-        entry["failure_reason"] = args.reason
-        entry["attempts"] = 0
-        entry["repair_scope"] = None
-        entry["repair_packet"] = None
-        entry["active_profile"] = None
-        entry["critical_review_call_id"] = None
-        entry["premium_call_id"] = None
-        entry["coverage_gate"] = None
-        entry["rerun_count"] = entry.get("rerun_count", 0) + 1
+        reopen_role(entry, args.reason)
         refresh_statuses(state["roles"])
         advance_review_cycle(state, f"선택 재실행: {args.role} ({args.change_kind})")
         append_event(
@@ -1992,6 +2093,15 @@ def locked_complete(args: argparse.Namespace, state_file: Path) -> int:
     if args.role != "final_reviewer" and (args.source_map or args.coverage_report):
         raise RunError("--source-map과 --coverage-report는 final_reviewer 완료에만 사용합니다.")
     artifacts = [resolve_artifact(raw, state_file) for raw in args.artifact]
+    patched_paths = [resolve_artifact(raw, state_file) for raw in (getattr(args, "patched", None) or [])]
+    if patched_paths and args.role != "final_reviewer":
+        raise RunError("--patched는 final_reviewer가 같은 호출 안에서 국소 수정한 선행 산출물을 다시 기록할 때만 사용합니다.")
+    patched_records: list[dict[str, Any]] = []
+    for path in patched_paths:
+        owner = record_patched_artifact(state, path)
+        patched_records.append({"role": owner, **artifact_record(path)})
+    if patched_records:
+        note_premium_patch(state, entry, patched_records)
     coverage_gate = None
     if args.role == "final_reviewer":
         coverage_gate, coverage_path = build_coverage_gate(
@@ -2013,6 +2123,44 @@ def locked_complete(args: argparse.Namespace, state_file: Path) -> int:
     save_state(state_file, state)
     print(f"통과: {args.role} | 산출물 {len(artifacts)}개")
     return 0
+
+
+def note_premium_patch(state: dict[str, Any], entry: dict[str, Any], patched: list[dict[str, Any]]) -> None:
+    """검수 호출 안의 국소 수정을 고비용 호출 원장에 남기고 입력 지문을 수정 후 값으로 갱신한다."""
+    call_id = entry.get("premium_call_id")
+    for call in state.get("cost_usage", {}).get("premium_final_reviews", []):
+        if isinstance(call, dict) and call.get("call_id") == call_id:
+            call["patched_artifacts"] = patched
+            call["input_fingerprint_before_patch"] = call.get("input_fingerprint")
+            call["input_fingerprint"] = final_review_input_fingerprint(state)
+            return
+    raise RunError("최종 검수의 고비용 호출 원장 항목을 찾을 수 없습니다.")
+
+
+def record_patched_artifact(state: dict[str, Any], path: Path) -> str:
+    """최종 검수가 국소 수정한 선행 역할 산출물의 해시를 다시 기록한다.
+
+    final_reviewer.md는 발견한 국소 문제를 같은 호출 안에서 고치라고 하므로, 고친 파일이
+    통과 역할의 기록된 산출물이면 새 해시를 기록해 verify가 변조로 보지 않게 한다.
+    """
+    upstream = upstream_roles(state["roles"], "final_reviewer")
+    for name in ROLE_ORDER:
+        other = state["roles"][name]
+        if other.get("status") != "passed":
+            continue
+        for index, record in enumerate(other.get("artifacts", [])):
+            if not isinstance(record, dict) or not record.get("path"):
+                continue
+            if Path(record["path"]).resolve() != path:
+                continue
+            if name not in upstream:
+                raise RunError(f"--patched 대상은 최종 검수의 선행 역할 산출물이어야 합니다: {name}: {path}")
+            previous = str(record.get("sha256") or "")[:12]
+            other["artifacts"][index] = artifact_record(path)
+            current = str(other["artifacts"][index].get("sha256") or "")[:12]
+            append_event(state, "review_patched", name, f"{path.name}: {previous or '?'} -> {current or '?'}")
+            return name
+    raise RunError(f"--patched 대상은 통과한 선행 역할의 기록된 산출물이어야 합니다: {path}")
 
 
 def command_fail(args: argparse.Namespace) -> int:
@@ -2327,6 +2475,16 @@ def build_parser() -> argparse.ArgumentParser:
     escalation_parser.add_argument("--reason", required=True)
     escalation_parser.set_defaults(func=command_escalate)
 
+    repair_parser = subparsers.add_parser(
+        "repair", help="최종 검수가 반려한 내용 결함을 고치기 위해 선행 역할과 후속 단계를 다시 엽니다."
+    )
+    repair_parser.add_argument("state", type=Path)
+    repair_parser.add_argument("--from-role", default="final_reviewer", choices=("final_reviewer",))
+    repair_parser.add_argument("--reopen", required=True, choices=ROLE_ORDER, help="다시 열 선행 역할(보통 writer 또는 source_mapper)")
+    repair_parser.add_argument("--reason", required=True, help="한 줄 반려 사유")
+    repair_parser.add_argument("--findings", default=None, help="검수 보고서 경로(기록용, 상태 폴더 기준)")
+    repair_parser.set_defaults(func=command_repair)
+
     start_parser = subparsers.add_parser("start", help="준비된 역할의 실제 실행을 기록합니다.")
     start_parser.add_argument("state", type=Path)
     start_parser.add_argument("--role", required=True, choices=ROLE_ORDER)
@@ -2344,6 +2502,12 @@ def build_parser() -> argparse.ArgumentParser:
     complete_parser.add_argument("state", type=Path)
     complete_parser.add_argument("--role", required=True, choices=ROLE_ORDER)
     complete_parser.add_argument("--artifact", action="append", required=True)
+    complete_parser.add_argument(
+        "--patched",
+        action="append",
+        default=[],
+        help="final_reviewer 전용: 검수 호출 안에서 국소 수정한 선행 산출물(초안·최종본·PDF). 새 해시를 다시 기록한다.",
+    )
     complete_parser.add_argument(
         "--source-map",
         help="final_reviewer가 대조한 source_mapper의 study_note_source_map JSON",

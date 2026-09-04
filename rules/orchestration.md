@@ -83,7 +83,7 @@ Python이 만든 후보를 확정 사실로 승격하지 않는다. 자동 치�
 | `instructor_integrator` | 서브에이전트 | 두 모드 `quality_high` | 왜곡 위험 핵심 패킷만 모드별 고강도 프로필 |
 | `formula_code_checker` | Python 계산·실행 + 서브에이전트 | 두 모드 `quality_high` | 핵심 수식 충돌만 모드별 고강도 프로필 |
 | `pedagogy_editor` | 서브에이전트 | 두 모드 `quality_high` | 핵심 개념·유도 공백만 모드별 고강도 프로필 |
-| `layout_builder` | Python 빌드·렌더 + 서브에이전트 표본 검수 | 두 모드 `economy_high` | 없음; 렌더·구조 오류는 Python 또는 같은 프로필 국소 수정 |
+| `layout_builder` | Python (`../scripts/build_study_note_pdf.py` 결정적 빌드 + `../scripts/validate_note_output.py`) | 모델 호출 없음 | 없음; 렌더·구조 오류는 스크립트 인자·여백 조정 |
 | `final_reviewer` | 서브에이전트 | `faithful=review_high`, `deep=quality_xhigh` | `faithful`의 의미 충돌만 `quality_xhigh`; `deep` 추가 승격 없음 |
 | `maintainer` | Python | 없음 | 없음 |
 
@@ -93,8 +93,7 @@ Python이 만든 후보를 확정 사실로 승격하지 않는다. 자동 치�
 
 1. `source_mapper`
 2. `writer`
-3. `layout_builder`
-4. `final_reviewer`
+3. `layout_builder`와 `final_reviewer` — **병렬**. 조판은 내용을 바꾸지 않는 결정적 Python 작업이므로 최종 검수는 조판을 기다리지 않고 집필 초안(`<!-- units -->` 추적 주석 포함)을 바로 검수한다. 둘 다 `writer`(와 활성 선택 역할)만 기다린다.
 
 `faithful`의 최소 경로는 위 네 역할이다. `deep`에서는 `pedagogy_editor`를 기본 활성화해 배경지식과 중간 사고의 누락을 점검한다. `maintainer`는 최종 전달 파일을 정리할 때만 짧게 실행한다. 다음 역할은 조건부다.
 
@@ -136,7 +135,7 @@ Python이 만든 후보를 확정 사실로 승격하지 않는다. 자동 치�
 - 같은 원자료를 여러 역할에 전달해야 하면 재추출하거나 재요약하지 않고 저장된 색인과 문맥 묶음을 재사용한다.
 - 수정 실행은 입력 해시와 선행 산출물 해시를 비교해 영향을 받은 단계만 무효화한다.
 - 역할 에이전트를 새로 시작할 때 런타임이 지원하면 전체 대화 이력을 상속하지 않는다. 역할 프롬프트와 명시된 파일 경로만 전달한다.
-- 같은 역할이 실패해도 전체 입력으로 다시 시작하지 않는다. 실패한 범위의 `model_input=true`, `kind=*packet`, 명시적 target이 있는 16KiB 이하 JSON에만 직접 근거를 추가해 최대 한 번 재검수한다. 첫 시도 뒤에는 동일 프로필 국소 repair 또는 `manage_run.py escalate`가 반환한 모드별 고강도 검수 중 하나만 허용한다. `final_reviewer`는 예외로 전체 검수 1회 안에서 국소 패치와 해당 위치 재확인까지 끝내며 두 번째 전체 호출을 하지 않는다.
+- 같은 역할이 실패해도 전체 입력으로 다시 시작하지 않는다. 실패한 범위의 `model_input=true`, `kind=*packet`, 명시적 target이 있는 16KiB 이하 JSON에만 직접 근거를 추가해 최대 한 번 재검수한다. 첫 시도 뒤에는 동일 프로필 국소 repair 또는 `manage_run.py escalate`가 반환한 모드별 고강도 검수 중 하나만 허용한다. `final_reviewer`는 예외로 전체 검수 1회 안에서 국소 패치와 해당 위치 재확인까지 끝내며 두 번째 전체 호출을 하지 않는다. 검수가 초안을 직접 고쳤으면 `complete --role final_reviewer --patched <고친 파일>`로 새 해시를 기록한다(고비용 호출 원장에 수정 전후 지문이 남는다). 국소 패치로 끝나지 않는 내용 결함은 `repair --reopen writer`(또는 `source_mapper`)로 선행 역할과 후속 단계를 다시 열고 새 `review_cycle`에서 한 번 더 검수한다 — 강의당 2회까지이며, 그 뒤에는 미해결로 사용자에게 보고한다. `rerun`은 사용자 요청·출력 계약 변경 전용이고 실패·실행 중 상태에서는 거부된다.
 - 단일 강의의 검증된 전사·정렬표·대응표가 있으면 작성 이후 역할에 원본 녹음이나 전체 원시 전사를 다시 전달하지 않는다.
 - 학생용 최종본에는 사용자가 요청하지 않은 쪽수·타임스탬프를 넣지 않는다. 추적 정보는 내부 대응표와 검수 보고서에만 유지한다.
 - 단일 최종 PDF는 `maintainer`를 생략한다. 복수 파일 패키징, 경로 이동, 전달 목록 생성이 실제로 필요할 때만 활성화한다.
@@ -151,7 +150,7 @@ Python이 만든 후보를 확정 사실로 승격하지 않는다. 자동 치�
 
 1. 저장된 `source_map`을 재사용하거나 변경 페이지에 한해 갱신한다.
 2. `writer`가 교안별 설명과 교수 고유 설명을 한 번에 통합한다.
-3. `layout_builder`가 최종 형식으로 만들고 전 페이지를 한 번 렌더 검수한다.
+3. `layout_builder`는 `python scripts/build_study_note_pdf.py <초안> --output <PDF> --course … --session …`으로 조판하고 `../scripts/validate_note_output.py`를 통과시킨다. 관리자가 렌더 표본(표지·표가 있는 쪽)만 확인한다. 이 단계는 4와 동시에 진행한다.
 4. `faithful`의 `final_reviewer`는 모든 source unit의 누락·왜곡을 `review_high`로 대조하고, `deep`의 `final_reviewer`는 완성본 전체의 논리·유도를 `quality_xhigh`로 한 번 검수한다.
 5. coverage report를 Python 게이트로 검증하고 source map과 함께 실행 상태에 기록한다.
 
@@ -239,6 +238,18 @@ python scripts/manage_run.py deactivate workspace/<강의ID>/run_state.json --ro
 - 조판·글꼴·깨진 참조 → `layout_builder`.
 
 반환 시 위치, 근거, 필요한 수정, 다시 검사할 명령을 함께 전달한다.
+
+최종 검수가 반려한 내용 결함은 다음 두 경로 중 하나로만 처리한다.
+
+```powershell
+# (a) 검수 호출 안에서 국소 패치한 경우: 고친 파일의 새 해시를 함께 기록
+python scripts/manage_run.py complete workspace/<강의ID>/run_state.json --role final_reviewer --artifact <검수_결과> --source-map <source_map_JSON> --coverage-report <coverage_JSON> --patched work/note_draft.md
+
+# (b) 집필을 다시 열어야 하는 경우: 반려 기록 + 집필 이후 재개 + 새 review_cycle
+python scripts/manage_run.py repair workspace/<강의ID>/run_state.json --reopen writer --reason "2장 도입 발언 누락" --findings work/final_review.md
+```
+
+(b) 뒤에는 `writer`가 검수 보고의 위치만 국소 수정한 초안으로 `complete`하고, 조판을 다시 빌드하고, 새 cycle의 `final_reviewer`를 한 번 실행한다.
 
 ## 10. 완료 게이트
 

@@ -94,6 +94,7 @@ class ArgumentInjectionTests(unittest.TestCase):
 
     def test_validate_picks_script_by_target(self) -> None:
         self.assertEqual(("validate_note_output.py", ["note.md"]), cli.resolve_script("validate", ["note", "note.md"]))
+        self.assertEqual(("build_study_note_pdf.py", ["a.md", "--output", "a.pdf"]), cli.resolve_script("build", ["a.md", "--output", "a.pdf"]))
         with self.assertRaises(ValueError):
             cli.resolve_script("validate", ["nope"])
         with self.assertRaises(ValueError):

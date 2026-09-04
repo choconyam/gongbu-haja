@@ -212,17 +212,19 @@ flowchart TD
     T --> A
     A --> S
     S --> W["작성 담당"]
+    W --> R["독립 최종 검수 담당 (조판과 병렬)"]
     W --> C{"추가 전문 검수가 필요한가?"}
     C -->|"교수 고유 설명"| I["교수 설명 반영 담당"]
     C -->|"수식·수치·코드"| F["수식·코드 검증 담당"]
     C -->|"설명 흐름 부족"| E["교육 품질 보강 담당"]
-    C -->|"추가 역할 불필요"| L["조판 담당"]
+    C -->|"추가 역할 불필요"| L["Python: 결정적 PDF 조판"]
     I --> L
     F --> L
     E --> L
-    L --> R["독립 최종 검수 담당"]
-    R -->|"실패"| M
+    R -->|"수정 필요"| P["국소 패치 또는 repair로 집필 재개"]
+    P --> W
     R -->|"통과"| V["Python: 상태·입력·산출물·문서 검증"]
+    L --> V
     V --> O["최종 학습노트 전달"]
 ```
 
@@ -274,7 +276,8 @@ Python 통과는 내용이 좋다는 뜻이 아니다. 자동 검사는 기계�
 - 전사, 텍스트 추출, 파일 해시, 문법 검사는 로컬 Python으로 처리한다.
 - 원자료의 페이지·타임스탬프 포인터를 보존하고 같은 내용을 역할마다 다시 요약하지 않는다.
 - 입력과 산출물 해시가 같으면 검증된 중간 결과를 재사용한다.
-- 검수 실패 시 전체를 처음부터 돌리지 않고 관련 역할과 그 뒤 단계만 다시 실행한다.
+- 검수 실패 시 전체를 처음부터 돌리지 않고 관련 역할과 그 뒤 단계만 다시 실행한다(`manage_run.py repair`, 강의당 2회).
+- 조판은 모델을 부르지 않는다. `scripts/build_study_note_pdf.py`가 초안을 그대로 PDF로 만들고, 최종 검수는 조판을 기다리지 않고 집필 직후 병렬로 돈다. 전사를 제외한 노트 한 편의 목표 소요는 10~15분이다.
 
 ### 역할별 실행 비용 정책
 
@@ -348,6 +351,7 @@ gongbu-haja/
 │  ├─ apply_transcript_corrections.py  승인된 구간 교정의 안전 적용·감사 로그
 │  ├─ record_lecture.py        Windows 온라인 강의 WASAPI 루프백 녹음
 │  ├─ manage_run.py            선택적 역할 계획·상태·입력 해시 관리
+│  ├─ build_study_note_pdf.py  초안 Markdown → A4 PDF 결정적 조판(내용 불변)
 │  ├─ project_types.py         녹음·녹화 형식 단일 정의
 │  ├─ validate_transcript_package.py
 │  ├─ validate_note_output.py
@@ -381,7 +385,7 @@ python scripts/manage_run.py start workspace/<강의ID>/run_state.json --role so
 python scripts/manage_run.py complete workspace/<강의ID>/run_state.json --role source_mapper --artifact work/source_map.json
 ```
 
-역할이 실패하면 전체 입력으로 다시 시작할 수 없다. 실패한 위치를 지정한 국소 재검수 한 번만 허용한다.
+역할이 실패하면 전체 입력으로 다시 시작할 수 없다. 실패한 위치를 지정한 국소 재검수 한 번만 허용한다. 최종 검수가 내용 결함을 반려했을 때는 검수가 직접 고친 파일을 `complete --patched`로 다시 기록하거나, `repair --reopen writer`로 집필 이후를 다시 열어 새 review cycle에서 한 번 더 검수한다.
 
 ```powershell
 python scripts/manage_run.py fail workspace/<강의ID>/run_state.json `
@@ -407,6 +411,18 @@ python scripts/validate_source_coverage.py work/source_map.json work/source_cove
 python scripts/manage_run.py complete workspace/<강의ID>/run_state.json `
   --role final_reviewer --artifact work/final_review.md `
   --source-map work/source_map.json --coverage-report work/source_coverage.json
+```
+
+```powershell
+python scripts/manage_run.py repair workspace/<강의ID>/run_state.json `
+  --reopen writer --reason "2장 도입 발언 누락" --findings work/final_review.md
+```
+
+조판은 결정적 스크립트다. 과목 폴더에서는 `gongbu build`가 같은 스크립트를 부른다.
+
+```powershell
+python scripts/build_study_note_pdf.py workspace/<강의ID>/work/note_draft.md `
+  --output output/<과목>_<차시>_학습노트.pdf --course "<과목>" --session "<차시>" --summary "<한 줄 요약>"
 ```
 
 수식이나 설명 부족이 뒤늦게 발견되면 해당 선택 역할만 활성화한다. 입력이 바뀌지 않은 재실행에서는 통과한 중간 산출물을 재사용하고, 검수 실패 시 관련 역할과 그 하위 단계만 다시 실행한다. 자세한 기준은 `rules/orchestration.md`에 있다.

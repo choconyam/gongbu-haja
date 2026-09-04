@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -901,20 +902,20 @@ class ManageRunTests(unittest.TestCase):
                 "rerun",
                 str(state_file),
                 "--role",
-                "layout_builder",
+                "writer",
                 "--change-kind",
-                "output_contract",
+                "user_request",
                 "--reason",
-                "출력 계약 확인",
+                "같은 초안으로 편집 요청 확인",
             )
-            self.run_cli("start", str(state_file), "--role", "layout_builder")
+            self.run_cli("start", str(state_file), "--role", "writer")
             self.run_cli(
                 "complete",
                 str(state_file),
                 "--role",
-                "layout_builder",
+                "writer",
                 "--artifact",
-                str(artifacts["layout_builder"]),
+                str(artifacts["writer"]),
             )
             duplicate = self.run_cli(
                 "start", str(state_file), "--role", "final_reviewer", expected=2
@@ -1007,6 +1008,17 @@ class ManageRunTests(unittest.TestCase):
             self.assertEqual("passed", state["roles"]["source_mapper"]["status"])
             self.assertEqual("passed", state["roles"]["writer"]["status"])
             self.assertEqual("ready", state["roles"]["layout_builder"]["status"])
+            # 조판은 내용을 바꾸지 않으므로 집필 초안을 검수한 결과는 유지된다.
+            self.assertEqual("passed", state["roles"]["final_reviewer"]["status"])
+
+            self.run_cli("start", str(state_file), "--role", "layout_builder")
+            self.run_cli("complete", str(state_file), "--role", "layout_builder", "--artifact", str(state_file.parent / "layout_builder.txt"))
+            self.run_cli(
+                "rerun", str(state_file), "--role", "writer", "--reason", "사용자 편집 요청", "--change-kind", "user_request"
+            )
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual("ready", state["roles"]["writer"]["status"])
+            self.assertEqual("blocked", state["roles"]["layout_builder"]["status"])
             self.assertEqual("blocked", state["roles"]["final_reviewer"]["status"])
 
     def test_maintainer_is_optional_and_can_be_activated(self) -> None:
@@ -1030,7 +1042,7 @@ class ManageRunTests(unittest.TestCase):
             )
             state = json.loads(state_file.read_text(encoding="utf-8"))
             self.assertTrue(state["roles"]["maintainer"]["active"])
-            self.assertEqual(["final_reviewer"], state["roles"]["maintainer"]["dependencies"])
+            self.assertEqual(["layout_builder", "final_reviewer"], state["roles"]["maintainer"]["dependencies"])
 
     def test_refresh_inputs_invalidates_affected_pipeline(self) -> None:
         # 새 교안이 들어오면 수동 JSON 삭제 없이 자료 매핑부터 다시 실행해야 한다.
@@ -1238,6 +1250,142 @@ class ManageRunTests(unittest.TestCase):
             self.assertTrue(state["roles"]["formula_code_checker"]["active"])
             self.assertEqual(["writer"], state["roles"]["formula_code_checker"]["dependencies"])
             self.assertIn("formula_code_checker", state["roles"]["layout_builder"]["dependencies"])
+
+
+    def _run_until_writer(self, lecture_id: str, root: Path) -> tuple[Path, Path, Path]:
+        inputs = root / "input"
+        inputs.mkdir()
+        (inputs / "handout.pdf").write_bytes(b"test-pdf")
+        result = self.run_cli("init", str(inputs), "--lecture-id", lecture_id, "--root", str(root))
+        state_file = Path(result.stdout.strip())
+        source_map = self.write_source_map(state_file)
+        self.run_cli("start", str(state_file), "--role", "source_mapper")
+        self.run_cli("complete", str(state_file), "--role", "source_mapper", "--artifact", str(source_map))
+        draft = state_file.parent / "note_draft.md"
+        draft.write_text("# 초안\n\n첫 번째 판", encoding="utf-8")
+        self.run_cli("start", str(state_file), "--role", "writer")
+        self.run_cli("complete", str(state_file), "--role", "writer", "--artifact", str(draft))
+        return state_file, source_map, draft
+
+    def _complete_layout(self, state_file: Path) -> Path:
+        pdf = state_file.parent / "note.pdf"
+        pdf.write_bytes(b"%PDF-1.4 layout")
+        self.run_cli("start", str(state_file), "--role", "layout_builder")
+        self.run_cli("complete", str(state_file), "--role", "layout_builder", "--artifact", str(pdf))
+        return pdf
+
+    def test_final_review_runs_next_to_layout_and_patched_artifacts_are_rerecorded(self) -> None:
+        # 조판은 결정적이라 최종 검수가 조판을 기다리지 않는다. 검수가 같은 호출 안에서
+        # 초안을 국소 수정했으면 --patched 로 새 해시를 기록해야 verify 가 변조로 보지 않는다.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state_file, source_map, draft = self._run_until_writer("parallel-review", root)
+            payload = json.loads(self.run_cli("next", str(state_file)).stdout)
+            ready = {item["role"] for item in payload["ready"]}
+            self.assertEqual({"layout_builder", "final_reviewer"}, ready)
+            self.assertEqual("python", payload["ready"][0]["execution"]["executor"] if payload["ready"][0]["role"] == "layout_builder" else "python")
+
+            self.run_cli("start", str(state_file), "--role", "final_reviewer")
+            draft.write_text("# 초안\n\n첫 번째 판 (검수 호출 안에서 국소 수정)", encoding="utf-8")
+            report = state_file.parent / "final_review.md"
+            report.write_text("통과", encoding="utf-8")
+            stray = state_file.parent / "stray.txt"
+            stray.write_text("x", encoding="utf-8")
+            coverage = self.write_coverage(state_file, "faithful")
+            rejected = self.run_cli(
+                "complete", str(state_file), "--role", "final_reviewer",
+                "--artifact", str(report), "--source-map", str(source_map), "--coverage-report", str(coverage),
+                "--patched", str(stray), expected=2,
+            )
+            self.assertIn("기록된 산출물이어야", rejected.stderr)
+            self.run_cli(
+                "complete", str(state_file), "--role", "final_reviewer",
+                "--artifact", str(report), "--source-map", str(source_map), "--coverage-report", str(coverage),
+                "--patched", str(draft),
+            )
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            recorded = state["roles"]["writer"]["artifacts"][0]
+            self.assertEqual(hashlib.sha256(draft.read_bytes()).hexdigest(), recorded["sha256"])
+            self.assertTrue(any(event["event"] == "review_patched" for event in state["events"]))
+
+            self._complete_layout(state_file)
+            self.run_raw("verify", str(state_file), "--check-inputs")
+
+            misuse = self.run_cli(
+                "start", str(state_file), "--role", "writer", expected=2
+            )
+            self.assertIn("시작할 수 없는 상태", misuse.stderr)
+
+    def test_repair_reopens_writer_after_review_rejection_and_is_limited(self) -> None:
+        # 검수 반려 → repair 로 집필을 다시 열고 새 cycle 에서 다시 검수한다. rerun 은 여전히 거부된다.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state_file, source_map, draft = self._run_until_writer("review-repair", root)
+            pdf = self._complete_layout(state_file)
+            self.run_cli("start", str(state_file), "--role", "final_reviewer")
+            report = state_file.parent / "final_review.md"
+            report.write_text("수정 필요: 2장 도입 발언 누락", encoding="utf-8")
+
+            not_upstream = self.run_cli(
+                "repair", str(state_file), "--reopen", "layout_builder", "--reason", "조판", expected=2
+            )
+            self.assertIn("선행 역할이 아닙니다", not_upstream.stderr)
+
+            self.run_cli(
+                "repair", str(state_file), "--reopen", "writer",
+                "--reason", "2장 도입 발언 누락 — 검수 반려", "--findings", str(report),
+            )
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(2, state["review_cycle"])
+            self.assertEqual("ready", state["roles"]["writer"]["status"])
+            self.assertEqual("blocked", state["roles"]["final_reviewer"]["status"])
+            self.assertEqual(0, state["roles"]["final_reviewer"]["attempts"])
+            self.assertEqual("blocked", state["roles"]["layout_builder"]["status"])
+            self.assertEqual("failed", state["cost_usage"]["premium_final_reviews"][0]["status"])
+            repairs = state["cost_usage"]["review_repairs"]
+            self.assertEqual(1, len(repairs))
+            self.assertEqual("writer", repairs[0]["reopened_role"])
+            self.assertEqual(report.name, Path(repairs[0]["findings"]["path"]).name)
+
+            blocked = self.run_cli(
+                "rerun", str(state_file), "--role", "writer", "--change-kind", "user_request", "--reason", "x", expected=2
+            )
+            self.assertIn("통과한 역할만", blocked.stderr)
+
+            draft.write_text("# 초안\n\n두 번째 판 (도입 발언 복원)", encoding="utf-8")
+            self.run_cli("start", str(state_file), "--role", "writer")
+            self.run_cli("complete", str(state_file), "--role", "writer", "--artifact", str(draft))
+            self.run_cli("start", str(state_file), "--role", "final_reviewer")
+            self.complete_final_review(state_file, report, source_map, "faithful")
+            self._complete_layout(state_file)
+            self.run_raw("verify", str(state_file), "--check-inputs")
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(
+                ["failed", "passed"],
+                [item["status"] for item in state["cost_usage"]["premium_final_reviews"]],
+            )
+
+            done = self.run_cli(
+                "repair", str(state_file), "--reopen", "writer", "--reason", "통과한 검수", expected=2
+            )
+            self.assertIn("실행 중이거나 실패한 상태", done.stderr)
+
+            # 두 번째 반려 수정까지는 허용, 세 번째는 거부한다.
+            self.run_cli(
+                "rerun", str(state_file), "--role", "writer", "--change-kind", "user_request", "--reason", "편집 요청"
+            )
+            for round_index in (2, 3):
+                draft.write_text(f"# 초안\n\n{round_index}번째 판", encoding="utf-8")
+                self.run_cli("start", str(state_file), "--role", "writer")
+                self.run_cli("complete", str(state_file), "--role", "writer", "--artifact", str(draft))
+                self.run_cli("start", str(state_file), "--role", "final_reviewer")
+                self.run_cli("fail", str(state_file), "--role", "final_reviewer", "--reason", "반려")
+                expected = 0 if round_index == 2 else 2
+                result = self.run_cli(
+                    "repair", str(state_file), "--reopen", "writer", "--reason", f"{round_index}차 반려", expected=expected
+                )
+                if round_index == 3:
+                    self.assertIn("이미 사용했습니다", result.stderr)
 
 
 if __name__ == "__main__":

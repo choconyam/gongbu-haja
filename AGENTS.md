@@ -103,6 +103,13 @@ python scripts/manage_run.py start workspace/<강의ID>/run_state.json --role <�
 python scripts/manage_run.py rerun workspace/<강의ID>/run_state.json --role layout_builder --change-kind output_contract --reason "사용자 출력 형식 변경"
 ```
 
+최종 검수가 반려한 내용 결함은 `rerun`이 아니라 다음으로 처리한다. 검수가 같은 호출 안에서 초안을 국소 패치했으면 `--patched`로 새 해시를 기록하고, 집필을 다시 열어야 하면 `repair`(강의당 2회)로 후속 단계를 다시 연다.
+
+```powershell
+python scripts/manage_run.py complete workspace/<강의ID>/run_state.json --role final_reviewer --artifact <검수_결과> --source-map <source_map_JSON> --coverage-report <coverage_report_JSON> --patched work/note_draft.md
+python scripts/manage_run.py repair workspace/<강의ID>/run_state.json --reopen writer --reason <한 줄 반려 사유> --findings work/final_review.md
+```
+
 국소 고강도 재검수는 첫 의미 작업에서 숫자·고유명사·수식·평가조건·근거 충돌·논리 또는 유도 공백이 남았을 때만 다음 게이트를 통과시킨 뒤, 명령이 반환한 프로필로 실행한다.
 
 ```powershell
