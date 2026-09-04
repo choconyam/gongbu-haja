@@ -27,6 +27,7 @@ if hasattr(sys.stderr, "reconfigure"):
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_INPUT_ROOT = PROJECT_ROOT / "input"
 DEFAULT_FRAMES_PER_BUFFER = 1_024
+SILENCE_POLL_SECONDS = 0.05
 
 
 class RecordingDependencyError(RuntimeError):
@@ -311,7 +312,19 @@ def capture_to_wav(
                     if read_available is not None:
                         available = int(read_available())
                         if available <= 0:
-                            time.sleep(0.05)
+                            # 재생이 멈추면 loopback 장치는 새 프레임을 전혀 주지 않는다.
+                            # 그냥 기다리기만 하면 무음 구간만큼 녹음 길이가 실제 재생
+                            # 시간보다 짧아져 이후 교안·자막과의 시간 정렬이 어긋난다.
+                            # 대기한 시간만큼 무음 프레임을 채워 타임라인을 맞춘다.
+                            time.sleep(SILENCE_POLL_SECONDS)
+                            silence_frames = int(round(SILENCE_POLL_SECONDS * sample_rate))
+                            if frame_limit is not None:
+                                silence_frames = min(silence_frames, frame_limit - captured_frames)
+                            if silence_frames > 0:
+                                output.writeframesraw(
+                                    bytes(silence_frames * sample_width * channels)
+                                )
+                                captured_frames += silence_frames
                             continue
                         requested = min(requested, available)
                     data = stream.read(requested, exception_on_overflow=False)

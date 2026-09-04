@@ -6,11 +6,13 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import math
 import tempfile
 import unittest
 import wave
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import sys
 
@@ -46,6 +48,19 @@ class FakeStream:
 
     def close(self) -> None:
         self.closed = True
+
+
+class FakeGappyStream(FakeStream):
+    """재생이 멈춰 가용 프레임이 0으로 보고되는 구간을 흉내낸다."""
+
+    def __init__(self, available_sequence: list[int]) -> None:
+        super().__init__()
+        self._available_sequence = list(available_sequence)
+
+    def get_read_available(self) -> int:
+        if len(self._available_sequence) > 1:
+            return self._available_sequence.pop(0)
+        return self._available_sequence[0]
 
 
 class FakeAudio:
@@ -220,6 +235,31 @@ class CaptureTests(unittest.TestCase):
             self.assertEqual([], list(output.parent.glob("*.part.wav")))
             with wave.open(str(output), "rb") as recorded:
                 self.assertEqual(256, recorded.getnframes())
+
+    def test_silence_gaps_are_filled_not_skipped(self) -> None:
+        # 재생이 멈춰 가용 프레임이 0인 폴링이 이어져도, 녹음 길이가 요청한
+        # duration만큼 채워져야 한다(무음 구간을 건너뛰면 타임라인이 압축된다).
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "gappy.wav"
+            stream = FakeGappyStream(available_sequence=[0, 0, 0, 10**9])
+            audio = FakeAudio(devices(), stream=stream)
+            with patch.object(rl.time, "sleep", lambda _seconds: None):
+                result = rl.capture_to_wav(
+                    audio,
+                    FakeBackend,
+                    devices()[1],
+                    output,
+                    "lecture-gap",
+                    duration=0.5,
+                    frames_per_buffer=1024,
+                )
+            expected_frames = math.ceil(0.5 * 48_000)
+            self.assertEqual("completed", result.status)
+            self.assertEqual(expected_frames, result.captured_frames)
+            with wave.open(str(output), "rb") as recorded:
+                self.assertEqual(expected_frames, recorded.getnframes())
+            # 무음으로 보고된 3번의 폴링에서는 실제 read가 호출되지 않았어야 한다.
+            self.assertLess(stream.read_count, expected_frames)
 
 
 class DependencyTests(unittest.TestCase):
