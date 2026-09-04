@@ -592,8 +592,3 @@ python -m pip install -r requirements-transcription.txt
 
 MIT — 저장소의 `LICENSE` 파일을 참조한다.
 
----
-
-<p align="center">
-  <img src="assets/chwi-ppo.jpg" alt="chwi-ppo! — 노트 다 만들었으면 취뽀 가자" width="640">
-</p>
