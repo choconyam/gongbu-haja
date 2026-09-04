@@ -131,7 +131,8 @@ class SubprocessTests(unittest.TestCase):
 
     def test_run_init_in_course_folder_keeps_state_out_of_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            course = Path(temporary)
+            # CI의 Windows TEMP는 8.3 단축 경로(RUNNER~1)라서, CLI가 돌려주는 resolve()된 경로와 맞추려면 먼저 푼다.
+            course = Path(temporary).resolve()
             lecture = course / "2026-03-10_과목A"
             lecture.mkdir()
             (lecture / "교안.pdf").write_bytes(b"%PDF-1.4 handout")
