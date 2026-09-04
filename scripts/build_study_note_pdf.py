@@ -46,22 +46,29 @@ try:
         TableStyle,
     )
     from reportlab.platypus.tableofcontents import TableOfContents
-except ImportError as exc:  # pragma: no cover - 설치 안내만
-    raise SystemExit(
-        "reportlab이 없습니다. `python -m pip install reportlab` 후 다시 실행하십시오."
-    ) from exc
+
+    REPORTLAB_ERROR: ImportError | None = None
+except ImportError as exc:
+    # reportlab이 없어도 모듈은 import돼야 한다(순수 함수 테스트·CLI 안내). 렌더는 main()에서 막는다.
+    REPORTLAB_ERROR = exc
+    A4 = (595.2756, 841.8898)
+    BaseDocTemplate = object  # type: ignore[assignment,misc]
+
+
+def _color(value: str):
+    return colors.HexColor(value) if REPORTLAB_ERROR is None else value
 
 
 PAGE_W, PAGE_H = A4
-ACCENT = colors.HexColor("#1F4E79")
-ACCENT_DARK = colors.HexColor("#173A5B")
-ACCENT_LIGHT = colors.HexColor("#EAF2F8")
-INK = colors.HexColor("#202A33")
-MUTED = colors.HexColor("#64707C")
-LINE = colors.HexColor("#D8E0E6")
-SOFT = colors.HexColor("#F6F8FA")
-WARM = colors.HexColor("#FFF7E8")
-WARNING = colors.HexColor("#A64B00")
+ACCENT = _color("#1F4E79")
+ACCENT_DARK = _color("#173A5B")
+ACCENT_LIGHT = _color("#EAF2F8")
+INK = _color("#202A33")
+MUTED = _color("#64707C")
+LINE = _color("#D8E0E6")
+SOFT = _color("#F6F8FA")
+WARM = _color("#FFF7E8")
+WARNING = _color("#A64B00")
 
 WINDOWS_FONTS = Path(r"C:\Windows\Fonts")
 # (본문, 본문 굵게, 제목, 제목 굵게) 후보를 순서대로 찾는다.
@@ -475,6 +482,9 @@ def main(argv: list[str] | None = None) -> int:
     output = args.output.expanduser().resolve()
     if not source.is_file():
         print(f"[오류] 원고가 없습니다: {source}", file=sys.stderr)
+        return 2
+    if REPORTLAB_ERROR is not None:
+        print("[오류] reportlab이 없습니다. `python -m pip install reportlab` 후 다시 실행하십시오.", file=sys.stderr)
         return 2
     if output.exists() and not args.force:
         print(f"[오류] 기존 PDF를 덮어쓰지 않습니다(--force 로 교체): {output}", file=sys.stderr)

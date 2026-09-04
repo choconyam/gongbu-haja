@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build_study_note_pdf as builder  # noqa: E402
 
 try:  # reportlab·한글 글꼴이 없는 CI에서는 렌더 테스트만 건너뛴다.
-    FONTS = builder.resolve_fonts(None, None)
+    FONTS = None if builder.REPORTLAB_ERROR is not None else builder.resolve_fonts(None, None)
 except FileNotFoundError:
     FONTS = None
 
