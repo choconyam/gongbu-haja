@@ -18,6 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import transcribe_lecture as tl  # noqa: E402
 
 
+# os.name을 "nt"로 바꾸면 Linux의 pathlib이 WindowsPath를 만들다 실패하고,
+# os.add_dll_directory는 Windows에만 있다. DLL 검색 경로 자체가 Windows 전용 기능이다.
+@unittest.skipUnless(sys.platform == "win32", "Windows 전용 NVIDIA DLL 검색 경로")
 class NvidiaDllDiscoveryTests(unittest.TestCase):
     def test_discovers_all_installed_nvidia_bin_directories(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
