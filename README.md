@@ -24,10 +24,20 @@
 
 | 모드 | 요청 예시 | 결과 |
 |---|---|---|
-| **자료 충실형** (`faithful`) | “자료 충실형으로 빠르게 정리해줘” | 교안과 검수된 교수 설명만 압축해 암기하기 좋게 정리한다. 외부 배경지식·새 유도는 기본적으로 넣지 않아 빠르고 모델 사용량이 적다. 기본 출력은 바로 읽고 고칠 수 있는 **Markdown**이다(PDF는 요청 시). |
+| **자료 충실형** (`faithful`) | “자료 충실형으로 빠르게 정리해줘” | 교안과 검수된 교수 설명만 암기·복습하기 좋게 정리한다. 외부 배경지식·새 유도는 기본적으로 넣지 않는다. 기본 출력은 바로 읽고 고칠 수 있는 **Markdown**이다(PDF는 요청 시). |
 | **심화 이해형** (`deep`) | “심화 이해형으로 배경과 연결 과정까지 설명해줘” | 과목 분야와 관계없이 필요한 배경 맥락, 인과관계, 중간 사고, 유도 과정, 예시와 적용 조건을 검증해 보강한다. 기본 출력은 인쇄용 **PDF**다. |
 
 새 학습노트 요청에서 모드를 말하지 않으면 에이전트는 작업을 시작하기 전에 항상 두 모드를 제시하고 선택을 받는다. 자료 특성에 맞는 모드를 추천할 수는 있지만 과목 계열만으로 결정하지 않는다. 명령행 초기화의 `--note-mode`는 필수 인자라, 모드를 정하지 않으면 실행 상태를 만들 수 없다. 어느 모드든 전사와 PDF 추출은 로컬에서 한 번만 수행하며, 전체 원시 전사를 역할마다 반복 전달하지 않는다.
+
+현재 Codex의 새 작업은 다음 모델 배정을 사용한다. 두 모드는 설명 범위와 검수 기준이 다르며, 자료 충실형도 집필·최종 검수에는 상위 모델을 쓴다.
+
+| 작업 | 자료 충실형 | 심화 이해형 |
+|---|---|---|
+| 집필·설명 통합·보강 | Astra medium | Astra medium |
+| 독립 최종 검수 | Astra high — 원자료 누락·약화·왜곡 대조 | Astra high — 전체 논리·유도·적용 조건까지 확인 |
+| 전사 후보 판정·자료 대응 | Luna high | Luna high |
+
+전사·추출·빌드·구조 검사는 로컬 Python이 처리한다. Claude Code의 모델 배정은 별도 표를 따르며, 실제 설정과 기존 실행의 처리 방식은 [역할별 실행 비용 정책](#역할별-실행-비용-정책)을 참고한다. 모델 간 비용·속도 우위를 보장하거나 비교용 노트를 추가로 만들지는 않는다.
 
 ## 처음이라면 — 하나씩 따라 하기
 
@@ -40,6 +50,7 @@ AI 에이전트를 써 본 적이 없어도 된다. 아래 순서대로 하면 �
 | AI 코딩 도구 하나 | **Codex**, **Claude Code** 또는 **Cursor**. 이 프로젝트에 일을 시키는 창구다. 사용하는 도구에 따라 구독료나 모델 사용료가 들 수 있다. |
 | Python 3.10 이상 | 입력 해시·실행 상태·산출물 검증에 필요. 녹음 전사를 사용할 때는 전사 패키지도 추가로 설치한다. [python.org](https://www.python.org/downloads/)에서 설치 |
 | Windows 시스템 오디오 녹음(선택) | 온라인 강의를 이 PC에서 직접 녹음할 때만 `requirements-recording.txt`를 설치한다. 대면 수업·마이크 녹음 용도가 아니다. |
+| deep PDF 출력(선택) | XeLaTeX·한글 글꼴과 TeX 패키지가 필요하다. [DEEP PDF 출력](#deep-pdf-출력) 참고. Markdown만 만들 때는 필요 없다. |
 | GPU | 없어도 된다. 전사가 느려질 뿐이다(1시간 강의 ≈ 20~40분) |
 
 ### 1. 프로젝트 받기 (기본 설치)
@@ -121,7 +132,7 @@ pipx install "gongbu-haja[recording,transcription,pdf] @ git+https://github.com/
 gongbu setup-agents
 ```
 
-- `[recording]`은 Windows 온라인 강의 녹음, `[transcription]`은 로컬 Whisper 전사, `[pdf]`는 PDF 조판(reportlab)용 선택 의존성이다. 둘 다 필요 없으면 `pipx install "gongbu-haja @ git+https://github.com/choconyam/gongbu-haja"`.
+- `[recording]`은 Windows 온라인 강의 녹음, `[transcription]`은 로컬 Whisper 전사, `[pdf]`는 Python PDF 도구용 선택 의존성이다. deep의 XeLaTeX 환경은 별도로 준비한다. 선택 기능이 모두 필요 없으면 `pipx install "gongbu-haja @ git+https://github.com/choconyam/gongbu-haja"`.
 - `gongbu setup-agents`는 `~/.claude/agents/`와 `~/.codex/agents/`에 서브 에이전트 선언 4개를 설치한다. `~/.codex/config.toml`은 `[agents]` 절이 없을 때만 끝에 덧붙이고, 이미 있으면 손대지 않고 맞출 값만 알려준다.
 
 그 다음은 과목 폴더에서 한다. 과목 폴더 하나가 자기 자료·녹음·상태·노트를 전부 갖고, 다른 과목과 섞이지 않는다.
@@ -222,23 +233,24 @@ flowchart TD
     Q -->|"아니요"| P["Python: 파일 유형·SHA-256·실행 계획 기록"]
     G --> P
     P --> D{"자료에 무엇이 있는가?"}
-    D -->|"녹음만 있음"| T["전사 담당 에이전트와 로컬 Whisper"]
+    D -->|"녹음만 있음"| T["Python: 로컬 Whisper 전사"]
     D -->|"녹음 또는 전사 있음"| A["전사 검수·교안 정렬 담당"]
     D -->|"교안 중심"| S["자료 매핑 담당"]
     T --> A
     A --> S
     S --> W["작성 담당"]
-    W --> R["독립 최종 검수 담당 (조판과 병렬)"]
     W --> C{"추가 전문 검수가 필요한가?"}
     C -->|"교수 고유 설명"| I["교수 설명 반영 담당"]
     C -->|"수식·수치·코드"| F["수식·코드 검증 담당"]
-    C -->|"설명 흐름 부족"| E["교육 품질 보강 담당"]
-    C -->|"추가 역할 불필요"| L["Python: 결정적 PDF 조판"]
-    I --> L
-    F --> L
-    E --> L
-    R -->|"수정 필요"| P["국소 패치 또는 repair로 집필 재개"]
-    P --> W
+    C -->|"deep 기본 / faithful 연결 보강 필요"| E["교육 품질 보강 담당"]
+    C -->|"추가 역할 불필요"| B["활성 선택 역할 완료·최신 원고 확정"]
+    I --> B
+    F --> B
+    E --> B
+    B --> L["모드별 조판·출력 확인"]
+    B --> R["독립 최종 의미 검수 (조판과 병렬)"]
+    R -->|"집필 수정 필요"| X["repair: 지정 범위 집필 재개"]
+    X --> W
     R -->|"통과"| V["Python: 상태·입력·산출물·문서 검증"]
     L --> V
     V --> O["최종 학습노트 전달"]
@@ -250,7 +262,6 @@ flowchart TD
 - 학습노트 작성
 - 조판
 - 독립 최종 검수
-- 최종 산출물 정리
 
 ### 자료에 따라 실행하는 역할
 
@@ -258,9 +269,10 @@ flowchart TD
 |---|---|
 | 녹음은 있고 전사본은 없음 | 녹음 전사 |
 | 녹음 또는 전사본이 있음 | 전사 검수·교안 정렬 |
-| 교수의 고유 설명·비유·정정이 있음 | 교수 설명 반영 |
+| 집필 결과에 교수 설명 보강이 필요함 | 교수 설명 반영 |
 | 수식·수치·그래프·코드가 있음 | 수식·코드 검증 |
-| 초안 설명이 얇거나 연결이 부족함 | 설명 난이도·밀도 보강 |
+| `deep`은 기본 실행, `faithful`은 명백한 연결 부족이 있을 때 | 설명 난이도·밀도 보강 |
+| 복수 파일 이동·패키징·전달 목록이 필요함 | 최종 산출물 정리 (`maintainer`) |
 
 ## 에이전트와 Python의 분업
 
@@ -300,10 +312,10 @@ Python 통과는 내용이 좋다는 뜻이 아니다. 자동 검사는 기계�
 `deep`은 원본 슬라이드 바로 아래에 쉬운 설명과 필요한 중간 유도를 배치한다. 수식은 교과서식으로 조판하고, 자동 목차·장식 박스·머리말·꼬리말·요청하지 않은 문제나 요약 부록은 넣지 않는다. 최종 전달 전에 원고와 TeX의 내용 동등성 및 PDF 모든 쪽의 가독성을 확인한다. 세부 기준은 [DEEP 출력 계약](rules/deep-output-contract.md)에 있다.
 
 ```powershell
-gongbu build <본문.tex> --note-mode deep --output <노트.pdf> --course <과목> --session <차시> --summary <파트내용한줄>
+python scripts/build_study_note_pdf.py <본문.tex> --note-mode deep --output <노트.pdf> --course <과목> --session <차시> --summary <파트내용한줄>
 ```
 
-TeX 본문은 사전에 준비해야 한다. XeLaTeX, `fontspec`, `xetexko`, `amsmath`, `amssymb`, `graphicx`, `geometry`와 한글 글꼴이 필요하며 빌더는 이를 자동 설치하지 않는다. `pip install gongbu-haja[pdf]`는 Python PDF 도구만 설치한다. 환경이 없거나 수식·글꼴 오류가 나면 빌드를 중단하고 기존 PDF를 보존한다.
+CLI 설치본에서는 `gongbu build`로 같은 빌더를 호출할 수 있다. TeX 본문은 사전에 준비해야 한다. XeLaTeX, `fontspec`, `xetexko`, `amsmath`, `amssymb`, `graphicx`, `geometry`와 한글 글꼴이 필요하며 빌더는 이를 자동 설치하지 않는다. Python PDF 도구 설치만으로 TeX 환경까지 준비되지는 않는다. 환경이 없거나 수식·글꼴 오류가 나면 빌드를 중단하고 기존 PDF를 보존한다.
 
 `faithful`의 기본 출력은 Markdown이며, PDF를 명시하면 기존 빌더를 사용한다. 기본 형식으로 시작한 실행은 `set-mode` 때 새 모드의 기본 형식을 따르고, 사용자가 지정한 형식은 유지한다.
 
@@ -381,7 +393,11 @@ gongbu-haja/
 │  ├─ apply_transcript_corrections.py  승인된 구간 교정의 안전 적용·감사 로그
 │  ├─ record_lecture.py        Windows 온라인 강의 WASAPI 루프백 녹음
 │  ├─ manage_run.py            선택적 역할 계획·상태·입력 해시 관리
-│  ├─ build_study_note_pdf.py  초안 Markdown → A4 PDF 결정적 조판(내용 불변)
+│  ├─ build_study_note_pdf.py  Markdown 출력·faithful PDF·deep TeX 빌드 진입점
+│  ├─ build_deep_pdf.py        deep 전용 XeLaTeX 컴파일·글꼴/넘침 검사
+│  ├─ deep_note_template.tex   최소 디자인·교과서 수식용 TeX 템플릿
+│  ├─ execution_profiles.py   공통 실행 프로필·런타임별 모델표
+│  ├─ sync_runtime_agents.py  모델표에서 런타임별 선언 생성
 │  ├─ project_types.py         녹음·녹화 형식 단일 정의
 │  ├─ validate_transcript_package.py
 │  ├─ validate_note_output.py
@@ -405,7 +421,7 @@ python scripts/manage_run.py next workspace/<강의ID>/run_state.json
 
 ```powershell
 python scripts/manage_run.py init <입력_폴더> --lecture-id <강의ID> `
-  --classify "강의내용메모.txt=transcript"
+  --note-mode faithful --classify "강의내용메모.txt=transcript"
 ```
 
 관리자 에이전트는 `next`에 표시된 역할만 실행하고, 함께 반환되는 `execution` 값에 따라 Python 또는 제한된 하위 에이전트에 배정한 뒤 시작과 완료를 기록한다. 역할의 산출물이 실제로 존재하지 않으면 통과 처리할 수 없다.
@@ -448,11 +464,11 @@ python scripts/manage_run.py repair workspace/<강의ID>/run_state.json `
   --reopen writer --reason "2장 도입 발언 누락" --findings work/final_review.md
 ```
 
-조판은 결정적 스크립트다. 과목 폴더에서는 `gongbu build`가 같은 스크립트를 부른다.
+자료 충실형 기본 Markdown은 다음처럼 출력한다. PDF가 필요한 경우에만 출력 확장자를 `.pdf`로 바꾼다. `deep` PDF는 위의 [전용 TeX 경로](#deep-pdf-출력)를 따른다. CLI 설치본에서는 `gongbu build`가 같은 스크립트를 부른다.
 
 ```powershell
 python scripts/build_study_note_pdf.py workspace/<강의ID>/work/note_draft.md `
-  --output output/<과목>_<차시>_학습노트.pdf --course "<과목>" --session "<차시>" --summary "<한 줄 요약>"
+  --output output/<과목>_<차시>_학습노트.md --course "<과목>" --session "<차시>"
 ```
 
 수식이나 설명 부족이 뒤늦게 발견되면 해당 선택 역할만 활성화한다. 입력이 바뀌지 않은 재실행에서는 통과한 중간 산출물을 재사용하고, 검수 실패 시 관련 역할과 그 하위 단계만 다시 실행한다. 자세한 기준은 `rules/orchestration.md`에 있다.
@@ -639,13 +655,6 @@ SRT는 타임스탬프 기준 원시 전사, TXT는 검색용 원문, Markdown�
 전체 단위 테스트와 Windows·Linux/Python 버전별 설치 호환성 검사는 기존 [GitHub Actions](.github/workflows/validate.yml)가 push와 pull request마다 실행한다. 테스트는 Python 작업이며 AI 모델을 호출하지 않는다. 로컬 검증과 CI 결과는 구분해서 보고하고, CI 실패는 해당 실패 범위부터 확인한다.
 
 ## 학습노트 산출물 검증
-
-프로젝트 구조:
-
-```powershell
-python scripts/validate_agent_setup.py --strict
-python -m unittest discover -s scripts -p "test_*.py"
-```
 
 전사 패키지:
 
