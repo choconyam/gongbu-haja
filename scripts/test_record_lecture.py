@@ -220,7 +220,8 @@ class CaptureTests(unittest.TestCase):
             self.assertEqual("lecture_recording_sidecar", payload["kind"])
             self.assertEqual(1.0, payload["playback_rate"])
             self.assertEqual(1.0, result.playback_rate)
-            self.assertEqual(str(sidecar), result.sidecar)
+            # CI의 Windows TEMP는 8.3 단축 경로라 resolve()한 뒤 비교한다.
+            self.assertEqual(sidecar.resolve(), Path(result.sidecar).resolve())
 
     def test_playback_rate_is_recorded_and_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
