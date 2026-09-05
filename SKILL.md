@@ -9,7 +9,7 @@ description: |
   become the input.
 license: MIT
 metadata:
-  version: "1.4.0"
+  version: "1.5.0"
 ---
 
 # gongbu-haja (공부하자)
