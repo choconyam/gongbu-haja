@@ -42,15 +42,18 @@ AI 에이전트를 써 본 적이 없어도 된다. 아래 순서대로 하면 �
 | Windows 시스템 오디오 녹음(선택) | 온라인 강의를 이 PC에서 직접 녹음할 때만 `requirements-recording.txt`를 설치한다. 대면 수업·마이크 녹음 용도가 아니다. |
 | GPU | 없어도 된다. 전사가 느려질 뿐이다(1시간 강의 ≈ 20~40분) |
 
-### 1. 프로젝트 받기
+### 1. 프로젝트 받기 (기본 설치)
 
 git을 쓸 줄 알면:
 
 ```bash
 git clone https://github.com/choconyam/gongbu-haja
+cd gongbu-haja
 ```
 
 git을 모르면: 이 페이지 위쪽의 초록색 **Code** 버튼 → **Download ZIP** → 압축을 풀면 된다.
+
+저장소 폴더를 직접 열어 쓰면 `gongbu` CLI 패키지를 설치할 필요가 없다. Python과 녹음·전사·PDF용 의존성은 사용하는 기능에 따라 준비한다.
 
 ### 2. 강의 자료 넣기
 
@@ -91,11 +94,24 @@ input/2026-03-10_과목A 자료로 자료 충실형 학습노트 만들어줘
 - **온라인 강의도 직접 녹음할 수 있나?** Windows에서는 가능하다. 사용자가 녹음을 명시적으로 요청하고 수강·녹음 권한을 확인한 온라인 강의에 한해, 기본 출력 장치의 재생음을 로컬 WAV로 저장한다. 대면 수업이나 주변 마이크는 녹음하지 않는다.
 - **전사만 따로 쓸 수 있나?** 된다. 녹음 파일을 `강의전사.bat`(여러 개면 `배치전사.bat`)에 끌어다 놓으면 전사본만 만들어 준다.
 
-## 설치 방법 — 사용하는 도구에 맞게 선택
+## 업데이트
 
-같은 엔진을 Codex, Claude Code, Cursor에서 사용할 수 있다. 어느 입구를 선택하든 규칙·역할·스크립트는 이 저장소 하나가 기준이다.
+Git으로 받은 저장소 폴더에서 실행한다.
 
-### 전역 CLI로 설치해 과목 폴더에서 쓰기 (추천)
+```bash
+git status --short
+git pull --ff-only
+```
+
+진행 중인 노트 작업이 끝난 뒤 업데이트한다. 직접 수정한 코드·규칙이 있거나 업데이트가 충돌하면 변경을 보존하고 원인을 확인한다. 강제 초기화로 해결하지 않는다. ZIP으로 받았다면 새 버전을 별도 폴더에 풀고 기존 자료·산출물을 보존한다.
+
+코드·규칙 업데이트마다 패키지를 다시 만들거나 전체 강의를 재검수할 필요는 없다. 의존성이나 사용자 범위 에이전트 선언을 바꾼 업데이트만 해당 설치·동기화를 추가로 수행한다. 업데이트 후에는 새 에이전트 작업을 열어 변경된 지침을 읽게 한다. 기존 실행 상태는 저장된 모델표를 유지한다.
+
+## 선택 설치 — 사용하는 도구에 맞게 선택
+
+기본은 위의 Git 설치다. 같은 엔진을 Codex, Claude Code, Cursor에서 사용할 수 있으며, 전역 명령이나 스킬·플러그인이 필요할 때만 아래 방식을 선택한다. 어느 입구를 선택하든 규칙·역할·스크립트는 이 저장소 하나가 기준이다.
+
+### 전역 CLI로 설치해 과목 폴더에서 쓰기 (선택)
 
 저장소를 clone하지 않아도 된다. Python 패키지 하나를 전역에 깔면 `gongbu` 명령이 생기고, 규칙·역할 프롬프트·스크립트가 패키지 안에 함께 들어간다.
 
@@ -128,12 +144,12 @@ gongbu transcribe 2026-03-10_1주차\녹음.wav          # 로컬 전사 → .go
 
 이후 AI 코딩 도구(Codex, Claude Code, Cursor)에서 그 과목 폴더를 열고 "2026-03-10_1주차 자료로 자료 충실형 학습노트 만들어줘"라고 요청하면, 스킬이 `gongbu paths`로 엔진 위치를 찾고 상태를 `.gongbu/`에 만든다. `gongbu run ...`, `gongbu validate ...`는 관리자 에이전트가 쓰는 명령이라 직접 칠 일은 거의 없다. 전체 목록은 `gongbu --help`.
 
-업데이트는 `pipx upgrade gongbu-haja`. 모델표·규칙이 패키지 버전에 묶여 있어 검증을 거친 버전만 올라간다. 저장소를 직접 열어 쓰는 아래 방식들도 그대로 유효하다.
+CLI 설치본은 Git 작업 폴더와 별개다. CLI 설치를 갱신할 때는 `pipx upgrade gongbu-haja`를 사용하고, 사용자 범위 에이전트 선언이 바뀌었다면 `gongbu setup-agents`로 동기화한다. 저장소의 `git pull`만으로 설치본까지 바뀌지는 않는다.
 
 | 방식 | 대상 | 설치·실행 |
 |---|---|---|
-| **전역 CLI** | Codex, Claude Code, Cursor | 위 절. `pipx install` 뒤 과목 폴더에서 `gongbu` |
-| **프로젝트로 직접 열기** | Codex, Claude Code, Cursor | `git clone` 후 저장소 폴더를 열고 요청. 세 도구 모두 루트의 `AGENTS.md` 또는 `CLAUDE.md`를 프로젝트 지침으로 사용 |
+| **프로젝트로 직접 열기 (기본)** | Codex, Claude Code, Cursor | `git clone` 후 저장소 폴더를 열고 요청. 업데이트는 `git pull --ff-only` |
+| **전역 CLI (선택)** | Codex, Claude Code, Cursor | 위 절. `pipx install` 뒤 과목 폴더에서 `gongbu` |
 | **Codex 스킬 설치** | Codex CLI·데스크톱 앱 | Codex에 “`$skill-installer`로 [`skills/gongbu-haja/`](https://github.com/choconyam/gongbu-haja/tree/main/skills/gongbu-haja)를 설치해줘”라고 요청 |
 | **Claude Code 플러그인** | Claude Code | `/plugin marketplace add choconyam/gongbu-haja` → `/plugin install gongbu-haja@gongbu-haja` |
 | **Claude Code 스킬 수동 설치** | Claude Code | 저장소의 `skills/gongbu-haja/` 폴더를 `~/.claude/skills/`에 복사 |
@@ -616,7 +632,13 @@ workspace/<lecture_id>/transcript/
 
 SRT는 타임스탬프 기준 원시 전사, TXT는 검색용 원문, Markdown은 검수 작업본이다. `segments.json`에는 구간별 신뢰도 관련 값이 들어가고 manifest에는 원본 파일 해시, 모델, 장치, 언어, 강의 식별 정보가 기록된다.
 
-## 검증
+## 업데이트 개발 시 검증
+
+로컬에서는 [유지보수 지침](AGENTS.md#저장소-유지보수)의 변경 범위별 검사만 수행한다. 모델 설정만 바꿨다면 모델 배정과 상태 검사를 하고, PDF 빌드·패키지 설치 검사를 매번 반복하지 않는다. 실제 강의의 비교용 집필이나 추가 의미 검수는 업데이트 검증에 포함하지 않는다.
+
+전체 단위 테스트와 Windows·Linux/Python 버전별 설치 호환성 검사는 기존 [GitHub Actions](.github/workflows/validate.yml)가 push와 pull request마다 실행한다. 테스트는 Python 작업이며 AI 모델을 호출하지 않는다. 로컬 검증과 CI 결과는 구분해서 보고하고, CI 실패는 해당 실패 범위부터 확인한다.
+
+## 학습노트 산출물 검증
 
 프로젝트 구조:
 
