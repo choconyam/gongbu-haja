@@ -38,6 +38,7 @@ class FakeStream:
         if self.interrupt_after is not None and self.read_count >= self.interrupt_after:
             raise KeyboardInterrupt
         self.read_count += 1
+        self.frames_read = getattr(self, "frames_read", 0) + frames
         return b"\x00\x00" * frames * 2
 
     def is_stopped(self) -> bool:
@@ -48,6 +49,20 @@ class FakeStream:
 
     def close(self) -> None:
         self.closed = True
+
+
+class FakeClock:
+    """time.sleep/time.monotonic 대역. sleep_scale<1이면 요청보다 실제 시간이 덜 흐르는 장치를 흉내낸다."""
+
+    def __init__(self, sleep_scale: float = 1.0) -> None:
+        self.now = 0.0
+        self.sleep_scale = sleep_scale
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds * self.sleep_scale
 
 
 class FakeGappyStream(FakeStream):
@@ -268,7 +283,8 @@ class CaptureTests(unittest.TestCase):
             output = Path(temporary) / "gappy.wav"
             stream = FakeGappyStream(available_sequence=[0, 0, 0, 10**9])
             audio = FakeAudio(devices(), stream=stream)
-            with patch.object(rl.time, "sleep", lambda _seconds: None):
+            clock = FakeClock()
+            with patch.object(rl.time, "sleep", clock.sleep), patch.object(rl.time, "monotonic", clock.monotonic):
                 result = rl.capture_to_wav(
                     audio,
                     FakeBackend,
@@ -285,6 +301,24 @@ class CaptureTests(unittest.TestCase):
                 self.assertEqual(expected_frames, recorded.getnframes())
             # 무음으로 보고된 3번의 폴링에서는 실제 read가 호출되지 않았어야 한다.
             self.assertLess(stream.read_count, expected_frames)
+
+    def test_bursty_device_does_not_inflate_recording_beyond_wall_clock(self) -> None:
+        # 장치가 패킷을 묶어 보내면 사이사이 폴링이 0을 돌려주지만 실제 시간은 거의 안 흐른다.
+        # 그때마다 50ms 무음을 넣으면 녹음이 벽시계보다 길어진다(실측 8분 → 15분). 무음은
+        # 벽시계 경과분까지만 채워야 한다.
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "bursty.wav"
+            stream = FakeGappyStream(available_sequence=[0, 480, 0, 480, 0, 480, 0, 480, 0, 480, 0, 480, 0, 480, 0, 480, 10**9])
+            audio = FakeAudio(devices(), stream=stream)
+            clock = FakeClock(sleep_scale=0.2)  # sleep(0.05)이 실제로는 0.01초만 흐른다
+            with patch.object(rl.time, "sleep", clock.sleep), patch.object(rl.time, "monotonic", clock.monotonic):
+                result = rl.capture_to_wav(
+                    audio, FakeBackend, devices()[1], output, "lecture-burst", duration=0.5, frames_per_buffer=480,
+                )
+            # 총 프레임은 요청 길이(0.5초)와 같고, 끼워 넣은 무음은 벽시계 경과분(+한 조각)을 넘지 않는다.
+            self.assertEqual(math.ceil(0.5 * 48_000), result.captured_frames)
+            inserted_silence = result.captured_frames - stream.frames_read
+            self.assertLessEqual(inserted_silence, int(clock.now * 48_000) + 2_400)
 
 
 class DependencyTests(unittest.TestCase):

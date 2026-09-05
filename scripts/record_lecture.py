@@ -329,7 +329,8 @@ def capture_to_wav(
         # 무한히 블로킹된다. 읽기 전에 가용 프레임을 확인하고, 종료는 프레임 수가 아니라
         # 벽시계 기준으로도 판정해 무음·일시정지 구간에서 녹음이 멈추지 않게 한다.
         read_available = getattr(stream, "get_read_available", None)
-        deadline = time.monotonic() + duration if duration is not None else None
+        loop_started = time.monotonic()
+        deadline = loop_started + duration if duration is not None else None
         with wave.open(str(temp_path), "wb") as output:
             output.setnchannels(channels)
             output.setsampwidth(sample_width)
@@ -346,10 +347,16 @@ def capture_to_wav(
                         if available <= 0:
                             # 재생이 멈추면 loopback 장치는 새 프레임을 전혀 주지 않는다.
                             # 그냥 기다리기만 하면 무음 구간만큼 녹음 길이가 실제 재생
-                            # 시간보다 짧아져 이후 교안·자막과의 시간 정렬이 어긋난다.
-                            # 대기한 시간만큼 무음 프레임을 채워 타임라인을 맞춘다.
+                            # 시간보다 짧아진다. 반대로 폴링마다 무조건 무음을 넣으면
+                            # 장치가 패킷을 묶어 보내는 짧은 공백에도 무음이 끼어 녹음이
+                            # 벽시계보다 길어진다(실측: 8분 녹음이 15분짜리로 부풀었다).
+                            # 그래서 무음은 "벽시계 경과 프레임 - 이미 쓴 프레임"만큼만 채운다.
                             time.sleep(SILENCE_POLL_SECONDS)
-                            silence_frames = int(round(SILENCE_POLL_SECONDS * sample_rate))
+                            expected_frames = int((time.monotonic() - loop_started) * sample_rate)
+                            silence_frames = min(
+                                int(round(SILENCE_POLL_SECONDS * sample_rate)),
+                                expected_frames - captured_frames,
+                            )
                             if frame_limit is not None:
                                 silence_frames = min(silence_frames, frame_limit - captured_frames)
                             if silence_frames > 0:
