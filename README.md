@@ -1,5 +1,11 @@
 # 범용 강의 학습노트 프로젝트
 
+[![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fchoconyam%2Fgongbu-haja%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=version&color=blue)](.claude-plugin/plugin.json)
+[![license MIT](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
+[![Codex supported](https://img.shields.io/badge/Codex-supported-black)](AGENTS.md)
+[![Claude Code supported](https://img.shields.io/badge/Claude_Code-supported-D97757)](CLAUDE.md)
+[![Cursor supported](https://img.shields.io/badge/Cursor-supported-black)](AGENTS.md)
+
 <p align="center">
   <img src="assets/gongbu-haja-banner.jpg" alt="gongbu-haja 마스코트" width="640">
 </p>
