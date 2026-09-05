@@ -56,6 +56,25 @@ class PublicTextTests(unittest.TestCase):
         self.assertIn("| A | 1 |", text)
         self.assertIn("> 주의: 이 상자는 그대로 렌더된다.", text)
 
+    def test_markdown_output_needs_no_reportlab_and_strips_only_tracking(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "note_draft.md"
+            source.write_text(SAMPLE, encoding="utf-8")
+            output = Path(temporary) / "out" / "note.md"
+            code = builder.main([str(source), "--output", str(output), "--course", "과목", "--session", "1주차 1차시"])
+            self.assertEqual(0, code)
+            text = output.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("# 과목 1주차 학습노트"))
+            self.assertNotIn("<!--", text)
+            self.assertNotIn("인계 메모", text)
+            self.assertIn("| A | 1 |", text)
+            # 기존 파일은 --force 없이는 덮어쓰지 않는다.
+            self.assertEqual(2, builder.main([str(source), "--output", str(output), "--course", "과목", "--session", "1주차 1차시"]))
+            headless = Path(temporary) / "headless.md"
+            headless.write_text("본문만 있음\n", encoding="utf-8")
+            builder.main([str(headless), "--output", str(Path(temporary) / "h.md"), "--course", "과목", "--session", "2차시"])
+            self.assertTrue((Path(temporary) / "h.md").read_text(encoding="utf-8").startswith("# 과목 2차시 학습노트"))
+
     def test_inline_markup_keeps_code_and_bold(self) -> None:
         rendered = builder.inline_markup("**정의**: 미디어는 `매개체`다 — 끝")
         self.assertIn("<b>정의</b>", rendered)

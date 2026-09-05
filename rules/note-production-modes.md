@@ -27,6 +27,7 @@ python scripts/manage_run.py set-mode workspace/<강의ID>/run_state.json --note
 - 이해에 필요한 연결어는 쓸 수 있지만 원자료가 말하지 않은 이유나 결론을 만들어내지 않는다.
 - 수식·코드 검수 역할이 필요하면 원자료와 계산의 정확성만 확인하며 새로운 장문 튜토리얼로 확장하지 않는다.
 - `pedagogy_editor`는 기본 비활성이다. 명백한 문장 연결 문제를 고칠 때만 범위를 제한해 수동 활성화한다.
+- 기본 최종 형식은 Markdown이다(`manage_run.py init`에서 `--output-format` 생략 시). 바로 열어 읽고 고치는 용도이며, 인쇄가 필요하면 사용자가 pdf를 지정한다. 심화 이해형의 기본은 pdf다.
 - 작성은 `quality_high`(상위 모델)로 수행한다. 경량 모델 집필은 교수 설명을 축약해 재작업을 부르므로 쓰지 않는다. 독립 최종 검수는 `review_high`(상위 모델 `high`)로 모든 source unit을 대응 노트 위치와 대조하며, Python coverage 게이트가 누락·중복·근거 없는 제외를 차단한다.
 - 최종 `review_high` 완성본 대조는 현재 `review_cycle`에서 한 번만 수행하고, 발견한 국소 문제는 같은 호출 안에서 수정·해당 위치만 재확인한다.
 

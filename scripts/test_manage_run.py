@@ -1252,6 +1252,23 @@ class ManageRunTests(unittest.TestCase):
             self.assertIn("formula_code_checker", state["roles"]["layout_builder"]["dependencies"])
 
 
+    def test_output_format_defaults_to_md_for_faithful_and_pdf_for_deep(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            faithful = Path(self.run_cli("init", str(inputs), "--lecture-id", "fmt-faithful", "--root", str(root)).stdout.strip())
+            self.assertEqual("md", json.loads(faithful.read_text(encoding="utf-8"))["output_format"])
+            deep = Path(
+                self.run_cli("init", str(inputs), "--lecture-id", "fmt-deep", "--root", str(root), "--note-mode", "deep").stdout.strip()
+            )
+            self.assertEqual("pdf", json.loads(deep.read_text(encoding="utf-8"))["output_format"])
+            explicit = Path(
+                self.run_cli("init", str(inputs), "--lecture-id", "fmt-explicit", "--root", str(root), "--output-format", "pdf").stdout.strip()
+            )
+            self.assertEqual("pdf", json.loads(explicit.read_text(encoding="utf-8"))["output_format"])
+
     def _run_until_writer(self, lecture_id: str, root: Path) -> tuple[Path, Path, Path]:
         inputs = root / "input"
         inputs.mkdir()

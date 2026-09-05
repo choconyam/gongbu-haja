@@ -28,6 +28,10 @@ if not defined LECTURE_ID (
 set "DEVICE_INDEX="
 set /p "DEVICE_INDEX=출력 loopback 장치 index(기본 장치는 빈칸): "
 
+set "PLAYBACK_RATE="
+set /p "PLAYBACK_RATE=강의 재생 배속(기본 1.75, 사이트가 배속을 막으면 1): "
+if not defined PLAYBACK_RATE set "PLAYBACK_RATE=1.75"
+
 echo.
 echo   먼저 30초 시험 녹음을 합니다. 온라인 강의를 시작 위치에서 일시정지하세요.
 echo   아무 키나 누른 뒤 강의를 재생하고, 30초가 지나면 다시 일시정지하세요.
@@ -63,19 +67,19 @@ set "RECORD_DURATION="
 set /p "RECORD_DURATION=본 녹음 시간(초, Ctrl+C로 끝낼 경우 빈칸): "
 echo.
 echo   온라인 강의를 시작 위치로 되돌려 일시정지하세요.
-echo   아무 키나 누르면 본 녹음을 시작합니다. 시작 메시지가 나오면 강의를 재생하세요.
+echo   아무 키나 누르면 본 녹음을 시작합니다. 시작 메시지가 나오면 강의를 %PLAYBACK_RATE%배속으로 재생하세요.
 pause >nul
 
 if defined RECORD_DURATION (
   if defined DEVICE_INDEX (
-    python "%~dp0scripts\record_lecture.py" --lecture-id "%LECTURE_ID%" --duration "%RECORD_DURATION%" --device-index "%DEVICE_INDEX%"
+    python "%~dp0scripts\record_lecture.py" --lecture-id "%LECTURE_ID%" --duration "%RECORD_DURATION%" --device-index "%DEVICE_INDEX%" --playback-rate "%PLAYBACK_RATE%"
   ) else (
-    python "%~dp0scripts\record_lecture.py" --lecture-id "%LECTURE_ID%" --duration "%RECORD_DURATION%"
+    python "%~dp0scripts\record_lecture.py" --lecture-id "%LECTURE_ID%" --duration "%RECORD_DURATION%" --playback-rate "%PLAYBACK_RATE%"
   )
 ) else if defined DEVICE_INDEX (
-  python "%~dp0scripts\record_lecture.py" --lecture-id "%LECTURE_ID%" --device-index "%DEVICE_INDEX%"
+  python "%~dp0scripts\record_lecture.py" --lecture-id "%LECTURE_ID%" --device-index "%DEVICE_INDEX%" --playback-rate "%PLAYBACK_RATE%"
 ) else (
-  python "%~dp0scripts\record_lecture.py" --lecture-id "%LECTURE_ID%"
+  python "%~dp0scripts\record_lecture.py" --lecture-id "%LECTURE_ID%" --playback-rate "%PLAYBACK_RATE%"
 )
 
 set "RECORD_EXIT=%ERRORLEVEL%"

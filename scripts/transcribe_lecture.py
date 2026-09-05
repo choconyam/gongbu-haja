@@ -690,6 +690,7 @@ def write_outputs(
         "source_audio": audio.name,
         "segments": records,
     }
+    recording_meta = read_recording_sidecar(audio)
     manifest = {
         "source_audio": audio.name,
         "source_audio_path": str(audio),
@@ -711,6 +712,11 @@ def write_outputs(
         "language": str(getattr(info, "language", getattr(args, "language", "ko"))),
         "language_probability": float(getattr(info, "language_probability", 0.0)),
         "duration_seconds": float(getattr(info, "duration", 0.0)),
+        # 녹음기가 남긴 sidecar(<stem>.recording.json)의 재생 배속. 타임스탬프는 녹음 시간 기준이고
+        # 강의 시간은 타임스탬프 × playback_rate 다.
+        "playback_rate": recording_meta.get("playback_rate", 1.0),
+        "lecture_seconds_estimate": round(float(getattr(info, "duration", 0.0)) * float(recording_meta.get("playback_rate", 1.0)), 3),
+        "recording_sidecar": recording_meta.get("_sidecar"),
         "status": "raw",
         "reviewed_against_audio": False,
         "unresolved_spans": [],
@@ -728,6 +734,24 @@ def write_outputs(
     atomic_write_text(Path(paths.draft_markdown), render_draft_markdown(identity, records))
     atomic_write_text(Path(paths.segments_json), json.dumps(segment_payload, ensure_ascii=False, indent=2) + "\n")
     atomic_write_text(Path(paths.manifest_json), json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+
+
+def read_recording_sidecar(audio: Path) -> dict:
+    """record_lecture.py가 녹음 옆에 남긴 배속·장치 메타데이터를 읽는다. 없으면 빈 dict."""
+    sidecar = audio.with_name(audio.stem + ".recording.json")
+    if not sidecar.is_file():
+        return {}
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(payload, dict) or payload.get("kind") != "lecture_recording_sidecar":
+        return {}
+    try:
+        rate = float(payload.get("playback_rate", 1.0))
+    except (TypeError, ValueError):
+        rate = 1.0
+    return {"playback_rate": rate if rate > 0 else 1.0, "_sidecar": sidecar.name}
 
 
 def print_plan(

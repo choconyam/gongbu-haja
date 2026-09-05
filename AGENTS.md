@@ -41,7 +41,7 @@
 
 ## 표준 실행
 
-사용자가 현재 PC에서 재생되는 **온라인 강의**를 직접 녹음해 달라고 요청한 경우에만, 실행 상태를 만들기 전에 Windows 시스템 오디오를 입력 폴더에 저장한다. 대면 수업이나 주변 마이크 녹음은 시작하지 않는다. 먼저 30초 시험 녹음으로 장치와 음량을 확인한다. 첫 수강이거나 사이트의 수강 인정 조건을 확인할 수 없으면 재생 속도는 1배로 유지한다.
+사용자가 현재 PC에서 재생되는 **온라인 강의**를 직접 녹음해 달라고 요청한 경우에만, 실행 상태를 만들기 전에 Windows 시스템 오디오를 입력 폴더에 저장한다. 대면 수업이나 주변 마이크 녹음은 시작하지 않는다. 먼저 30초 시험 녹음으로 장치와 음량을 확인한다. 재생 배속은 기본 1.75배이며(`--playback-rate`, 녹음 sidecar와 전사 manifest에 기록), 사이트의 수강 인정 조건이 배속을 막거나 사용자가 1배를 요구할 때만 1배로 재생한다.
 
 ```powershell
 python scripts/record_lecture.py --lecture-id <강의ID> --duration 30
@@ -68,7 +68,7 @@ python scripts/apply_transcript_corrections.py <구간_JSON> <교정_결정_JSON
 강의별 작업 상태를 먼저 만든다. 새 노트는 사용자가 선택한 두 제작 모드 중 하나를 기록한다. `faithful`(자료 충실형)은 교안·교수 설명만 빠르게 정리하고, `deep`(심화 이해형)은 과목 분야와 관계없이 필요한 배경 맥락·인과관계·중간 사고·유도·예시를 검증해 보강한다. 사용자가 새 학습노트를 요청하면서 모드를 말하지 않았다면 작업 시작 전에 항상 두 선택지를 짧게 제시하고 하나를 선택받는다. 자료에 맞는 추천은 할 수 있지만 계열만으로 대신 결정하지 않는다.
 
 ```powershell
-python scripts/manage_run.py init <입력_폴더> --lecture-id <강의ID> --note-mode faithful --output-format pdf
+python scripts/manage_run.py init <입력_폴더> --lecture-id <강의ID> --note-mode faithful   # 출력 형식 생략 시 faithful=md, deep=pdf
 python scripts/manage_run.py next workspace/<강의ID>/run_state.json
 ```
 

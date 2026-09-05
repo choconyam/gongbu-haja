@@ -24,8 +24,8 @@
 
 | 모드 | 요청 예시 | 결과 |
 |---|---|---|
-| **자료 충실형** (`faithful`) | “자료 충실형으로 빠르게 정리해줘” | 교안과 검수된 교수 설명만 압축해 암기하기 좋게 정리한다. 외부 배경지식·새 유도는 기본적으로 넣지 않아 빠르고 모델 사용량이 적다. |
-| **심화 이해형** (`deep`) | “심화 이해형으로 배경과 연결 과정까지 설명해줘” | 과목 분야와 관계없이 필요한 배경 맥락, 인과관계, 중간 사고, 유도 과정, 예시와 적용 조건을 검증해 보강한다. |
+| **자료 충실형** (`faithful`) | “자료 충실형으로 빠르게 정리해줘” | 교안과 검수된 교수 설명만 압축해 암기하기 좋게 정리한다. 외부 배경지식·새 유도는 기본적으로 넣지 않아 빠르고 모델 사용량이 적다. 기본 출력은 바로 읽고 고칠 수 있는 **Markdown**이다(PDF는 요청 시). |
+| **심화 이해형** (`deep`) | “심화 이해형으로 배경과 연결 과정까지 설명해줘” | 과목 분야와 관계없이 필요한 배경 맥락, 인과관계, 중간 사고, 유도 과정, 예시와 적용 조건을 검증해 보강한다. 기본 출력은 인쇄용 **PDF**다. |
 
 새 학습노트 요청에서 모드를 말하지 않으면 에이전트는 작업을 시작하기 전에 항상 두 모드를 제시하고 선택을 받는다. 자료 특성에 맞는 모드를 추천할 수는 있지만 과목 계열만으로 결정하지 않는다. 명령행 초기화의 `--note-mode`는 필수 인자라, 모드를 정하지 않으면 실행 상태를 만들 수 없다. 어느 모드든 전사와 PDF 추출은 로컬에서 한 번만 수행하며, 전체 원시 전사를 역할마다 반복 전달하지 않는다.
 
@@ -122,7 +122,7 @@ C:\강의\미디어빅뱅과방송\                    ← 과목 폴더 (여기
 ```bash
 cd C:\강의\미디어빅뱅과방송
 gongbu setup                                        # .gongbu/, output/, .gitignore(녹음·상태 제외) 준비
-gongbu record --lecture-id 2026-03-10_1주차          # 온라인 강의 녹음 (Windows) → 2026-03-10_1주차\ 아래 WAV
+gongbu record --lecture-id 2026-03-10_1주차          # 온라인 강의 녹음 (Windows, 1.75배속 재생 전제) → 2026-03-10_1주차\ 아래 WAV
 gongbu transcribe 2026-03-10_1주차\녹음.wav          # 로컬 전사 → .gongbu\2026-03-10_1주차\transcript\
 ```
 
@@ -367,7 +367,7 @@ gongbu-haja/
 입력 폴더를 준비한 뒤 강의별 상태 파일을 만든다.
 
 ```powershell
-python scripts/manage_run.py init <입력_폴더> --lecture-id <강의ID> --note-mode faithful --output-format pdf
+python scripts/manage_run.py init <입력_폴더> --lecture-id <강의ID> --note-mode faithful   # --output-format 생략 시 faithful=md, deep=pdf
 python scripts/manage_run.py next workspace/<강의ID>/run_state.json
 ```
 
@@ -506,7 +506,7 @@ python scripts/record_lecture.py --list-devices
 python scripts/record_lecture.py --lecture-id "2026-03-10_과목A_본강의" --duration 30
 ```
 
-시험 파일을 재생해 음량을 확인한 뒤 본 녹음을 시작한다. `--duration`을 생략하면 `Ctrl+C`를 누를 때까지 녹음한다.
+시험 파일을 재생해 음량을 확인한 뒤 본 녹음을 시작한다. `--duration`을 생략하면 `Ctrl+C`를 누를 때까지 녹음한다. 재생 배속은 기본 **1.75배**다(`--playback-rate`, 최대 2). 플레이어가 배속을 지원하면 1.75배로 틀어 녹음 시간을 줄이고, 사이트가 배속을 막으면 `--playback-rate 1`로 1배 재생한다. 배속은 녹음 옆 `.recording.json`과 전사 manifest에 남고, 전사 타임스탬프는 녹음 시간 기준이다.
 
 ```powershell
 python scripts/record_lecture.py --lecture-id "2026-03-10_과목A_본강의"

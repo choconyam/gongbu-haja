@@ -81,8 +81,10 @@ USAGE = f"""gongbu {__version__} — 과목 폴더에서 쓰는 gongbu-haja 명�
   run init <입력폴더> --lecture-id <ID> --note-mode faithful|deep
                          상태 파일을 <과목>/{STATE_DIR_NAME}/<ID>/run_state.json 에 만든다
   run next|start|complete|fail|repair|escalate|... <run_state.json> ...
-  build <초안.md> --output <PDF> --course <과목> --session <차시> [--summary ...]
-                         결정적 PDF 조판 (추적 주석 제거, 내용 불변)
+  build <초안.md> --output <노트.md|PDF> --course <과목> --session <차시> [--summary ...]
+                         결정적 조판 (추적 주석 제거, 내용 불변). .md 출력은 1초, PDF는 reportlab 필요
+  record ... --playback-rate 1.75
+                         재생 배속 기본 1.75 (사이트가 막으면 1). 배속은 녹음 sidecar·전사 manifest에 기록
 
 검수 도구
   review-prep ...        전사 용어 후보·검수 패킷 생성

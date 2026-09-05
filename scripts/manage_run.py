@@ -102,6 +102,8 @@ COST_POLICY = {
 }
 
 MAX_REPAIR_SCOPE_CHARS = 240
+# 모드별 기본 최종 형식. 자료 충실형은 바로 읽고 고치는 md, 심화 이해형은 인쇄용 pdf.
+DEFAULT_OUTPUT_FORMATS = {"faithful": "md", "deep": "pdf"}
 MAX_AGENT_PACKET_BYTES = int(COST_POLICY["max_agent_packet_bytes"])
 CRITICAL_REVIEW_LIMIT = int(COST_POLICY["targeted_escalations"])
 PREMIUM_FINAL_REVIEW_LIMIT = int(COST_POLICY["premium_final_reviews_per_cycle"])
@@ -1301,6 +1303,8 @@ def command_init(args: argparse.Namespace) -> int:
         raise RunError(f"이미 실행 상태가 있습니다. 덮어쓰지 않았습니다: {state_file}")
     # 입력 검증과 해시 계산은 락·폴더 생성 전에 끝내, 실패한 init이
     # 빈 workspace/<강의ID>/ 폴더를 남기지 않게 한다.
+    if args.output_format is None:
+        args.output_format = DEFAULT_OUTPUT_FORMATS[args.note_mode]
     runtime = args.runtime or detect_runtime()
     if runtime is None:
         raise RunError(
@@ -2377,7 +2381,12 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser = subparsers.add_parser("init", help="입력 해시와 선택적 역할 실행 계획을 만듭니다.")
     init_parser.add_argument("input_dir", type=Path)
     init_parser.add_argument("--lecture-id", required=True)
-    init_parser.add_argument("--output-format", choices=("md", "pdf", "docx"), default="pdf")
+    init_parser.add_argument(
+        "--output-format",
+        choices=("md", "pdf", "docx"),
+        default=None,
+        help="최종 형식. 생략하면 faithful은 md(바로 읽고 고치는 용도), deep은 pdf(인쇄용). 사용자 지정이 우선.",
+    )
     init_parser.add_argument(
         "--note-mode",
         choices=NOTE_MODES,

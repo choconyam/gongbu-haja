@@ -472,22 +472,42 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--kicker", default="STUDY NOTE", help="표지 상단 작은 제목")
     parser.add_argument("--font-body", type=Path, default=None, help="본문 TTF 경로(선택)")
     parser.add_argument("--font-head", type=Path, default=None, help="제목 TTF 경로(선택)")
-    parser.add_argument("--force", action="store_true", help="기존 PDF를 덮어쓴다")
+    parser.add_argument("--force", action="store_true", help="기존 출력을 덮어쓴다")
+    parser.add_argument(
+        "--format",
+        choices=("pdf", "md"),
+        default=None,
+        help="출력 형식. 생략하면 --output 확장자로 정한다(.md → md, 그 외 pdf). md는 추적 주석만 제거한 학생용 Markdown.",
+    )
     return parser.parse_args(argv)
+
+
+def write_markdown(source: Path, output: Path, course: str, session: str) -> Path:
+    """학생용 Markdown: 추적 주석·인계 메모만 제거한다. 제목이 없으면 과목·차시로 붙인다."""
+    text = public_text(source.read_text(encoding="utf-8"))
+    if not text.lstrip().startswith("# "):
+        text = f"# {course} {session} 학습노트\n\n{text}"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(text, encoding="utf-8", newline="\n")
+    return output
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     source = args.source.expanduser().resolve()
     output = args.output.expanduser().resolve()
+    output_format = args.format or ("md" if output.suffix.lower() == ".md" else "pdf")
     if not source.is_file():
         print(f"[오류] 원고가 없습니다: {source}", file=sys.stderr)
         return 2
+    if output.exists() and not args.force:
+        print(f"[오류] 기존 출력을 덮어쓰지 않습니다(--force 로 교체): {output}", file=sys.stderr)
+        return 2
+    if output_format == "md":
+        print(write_markdown(source, output, args.course, args.session))
+        return 0
     if REPORTLAB_ERROR is not None:
         print("[오류] reportlab이 없습니다. `python -m pip install reportlab` 후 다시 실행하십시오.", file=sys.stderr)
-        return 2
-    if output.exists() and not args.force:
-        print(f"[오류] 기존 PDF를 덮어쓰지 않습니다(--force 로 교체): {output}", file=sys.stderr)
         return 2
     try:
         fonts = resolve_fonts(args.font_body, args.font_head)

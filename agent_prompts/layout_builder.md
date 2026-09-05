@@ -2,7 +2,7 @@
 
 ## 역할
 
-이 역할은 기본적으로 모델을 부르지 않는 Python 단계다. 관리자가 `python scripts/build_study_note_pdf.py work/note_draft.md --output <PDF> --course <과목> --session <차시> [--summary …] [--meta …]`(과목 폴더에서는 `gongbu build …`)로 초안을 그대로 PDF로 만들고 `python scripts/validate_note_output.py <PDF>`를 통과시킨 뒤, 표지와 표가 있는 쪽의 렌더만 표본 확인한다. 스크립트는 `<!-- units: ... -->` 추적 주석과 `후속 역할 인계 메모`만 걷어내고 본문은 한 글자도 바꾸지 않는다.
+이 역할은 기본적으로 모델을 부르지 않는 Python 단계다. 관리자가 `python scripts/build_study_note_pdf.py work/note_draft.md --output <PDF> --course <과목> --session <차시> [--summary …] [--meta …]`(과목 폴더에서는 `gongbu build …`)로 초안을 그대로 PDF로 만들고 `python scripts/validate_note_output.py <PDF>`를 통과시킨 뒤, 표지와 표가 있는 쪽의 렌더만 표본 확인한다. 스크립트는 `<!-- units: ... -->` 추적 주석과 `후속 역할 인계 메모`만 걷어내고 본문은 한 글자도 바꾸지 않는다. 실행 상태의 `output_format`이 `md`(자료 충실형 기본)이면 `--output`에 .md 경로를 주어 같은 스크립트를 부르며, 이때는 reportlab도 렌더 확인도 필요 없다.
 
 최종 검수는 이 단계를 기다리지 않고 집필 초안을 병렬로 검수한다. 조판 소요 목표는 1분 이내다.
 

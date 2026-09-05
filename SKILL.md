@@ -9,7 +9,7 @@ description: |
   become the input.
 license: MIT
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
 ---
 
 # gongbu-haja (공부하자)
@@ -51,7 +51,7 @@ git clone https://github.com/choconyam/gongbu-haja "$HOME/gongbu-haja"
 
 새 학습노트를 시작할 때 사용자가 `자료 충실형(faithful)` 또는 `심화 이해형(deep)`을 선택하게 한다. 사용자가 이미 모드를 명시했다면 그대로 기록하고, 명시하지 않았다면 다른 작업을 시작하기 전에 항상 두 모드의 범위와 비용 차이를 짧게 설명해 선택받는다. `deep`은 특정 계열 전용이 아니다.
 
-사용자가 현재 PC에서 재생되는 온라인 강의의 녹음을 명시적으로 요청했다면 엔진의 `scripts/record_lecture.py`와 `rules/transcription-workflow.md`를 따르고, `--output`에는 호출한 과목 폴더 안의 충돌 없는 새 WAV 경로를 넘긴다. 대면 수업이나 주변 마이크 녹음은 수행하지 않는다. 사이트 열기와 로그인·2단계 인증은 사용자가 직접 처리하고, 접근 제어나 DRM을 우회하지 않는다. 특정 학교명, 사이트 URL, 계정·인증 정보, 쿠키, 세션, 브라우저 프로필은 프로젝트 파일이나 로그에 저장하거나 Git/GitHub에 커밋하지 않는다.
+사용자가 현재 PC에서 재생되는 온라인 강의의 녹음을 명시적으로 요청했다면 엔진의 `scripts/record_lecture.py`와 `rules/transcription-workflow.md`를 따르고, `--output`에는 호출한 과목 폴더 안의 충돌 없는 새 WAV 경로를 넘긴다(`gongbu record`는 자동). 재생 배속은 기본 1.75배이고 사이트가 막을 때만 `--playback-rate 1`이다. 대면 수업이나 주변 마이크 녹음은 수행하지 않는다. 사이트 열기와 로그인·2단계 인증은 사용자가 직접 처리하고, 접근 제어나 DRM을 우회하지 않는다. 특정 학교명, 사이트 URL, 계정·인증 정보, 쿠키, 세션, 브라우저 프로필은 프로젝트 파일이나 로그에 저장하거나 Git/GitHub에 커밋하지 않는다.
 
 ## 경계
 

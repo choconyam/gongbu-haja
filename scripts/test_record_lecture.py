@@ -213,6 +213,30 @@ class CaptureTests(unittest.TestCase):
                 self.assertEqual(960, recorded.getnframes())
             self.assertEqual(5, audio.open_kwargs["input_device_index"])
             self.assertFalse(audio.open_kwargs.get("output", False))
+            # 배속 메타데이터는 녹음 옆 sidecar에 남고 결과에도 실린다(기본 1.0, 전사가 읽어 manifest로 옮김).
+            sidecar = output.with_name(output.stem + ".recording.json")
+            self.assertTrue(sidecar.is_file())
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            self.assertEqual("lecture_recording_sidecar", payload["kind"])
+            self.assertEqual(1.0, payload["playback_rate"])
+            self.assertEqual(1.0, result.playback_rate)
+            self.assertEqual(str(sidecar), result.sidecar)
+
+    def test_playback_rate_is_recorded_and_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "fast.wav"
+            result = rl.capture_to_wav(
+                FakeAudio(devices()), FakeBackend, devices()[1], output, "lecture-3",
+                duration=0.02, frames_per_buffer=512, playback_rate=1.75,
+            )
+            payload = json.loads(Path(result.sidecar).read_text(encoding="utf-8"))
+            self.assertEqual(1.75, payload["playback_rate"])
+            self.assertAlmostEqual(result.duration_seconds * 1.75, payload["lecture_seconds_estimate"], places=3)
+            with self.assertRaises(ValueError):
+                rl.capture_to_wav(
+                    FakeAudio(devices()), FakeBackend, devices()[1], Path(temporary) / "bad.wav", "lecture-4",
+                    duration=0.02, playback_rate=2.5,
+                )
 
     def test_ctrl_c_finalizes_and_atomically_saves_partial_recording(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

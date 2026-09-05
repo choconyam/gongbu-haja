@@ -30,6 +30,7 @@
     - `subagent`: 역할 전체가 아니라 현재 단원·절의 제한된 근거 묶음을 독립 하위 에이전트에 맡긴다.
 11. 각 담당에게 전체 자료가 아니라 역할 프롬프트, 해당 범위의 근거 묶음, 필요한 선행 산출물, 출력 경로를 전달한다.
     - 모든 담당 요청에 실행 상태의 `note_mode`와 `mode_contract`를 포함한다.
+    - 최종 형식은 실행 상태의 `output_format`을 따른다(faithful 기본 md, deep 기본 pdf, 사용자 지정 우선). md는 `python scripts/build_study_note_pdf.py work/note_draft.md --output <과목>_<차시>_학습노트.md --course … --session …`이 추적 주석만 떼어 만든다(모델·reportlab 불필요, 1초).
     - 전사 후보 판정·자료 대응처럼 범위가 제한된 반복 의미 작업은 `economy_high`로 호출한다. 조판은 모델을 부르지 않는다: `python scripts/build_study_note_pdf.py work/note_draft.md --output <PDF> --course <과목> --session <차시>`(과목 폴더에서는 `gongbu build ...`)로 빌드하고 `../scripts/validate_note_output.py`를 통과시킨 뒤 표지·표가 있는 쪽 렌더만 표본 확인한다.
     - `writer`가 통과하면 `layout_builder`와 `final_reviewer`가 동시에 `ready`가 된다. 조판을 돌리면서 바로 최종 검수를 시작한다(검수 대상은 추적 주석이 있는 work/note_draft.md).
     - 학습노트 한 편의 목표 소요는 전사 제외 10~15분이다: 집필(quality_high) 5~7분, 조판 1분 이내, 검수(review_high) 5~7분이 병렬로 겹친다. 검수 반려는 위 13의 경로로 한 번에 처리하고, 두 번째 반려부터는 남은 결함을 사용자에게 보고한다.

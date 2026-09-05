@@ -8,7 +8,7 @@
 - Windows에서는 `../scripts/record_lecture.py`를 기본 로컬 녹음기로 사용한다. 이 스크립트는 PyAudioWPatch의 WASAPI 루프백으로 선택한 출력 장치에서 재생되는 소리를 WAV로 저장하며 마이크는 기본적으로 포함하지 않는다.
 - 로그인, 2단계 인증, CAPTCHA는 사용자가 직접 처리한다. 사이트의 접근 제어나 DRM을 우회하지 않는다.
 - 강의 사이트 주소는 사용자가 실행할 때마다 직접 제공하고 브라우저에서 연다. 특정 학교명, 사이트 URL, 계정 식별자, 비밀번호, 2단계 인증 값, 쿠키, 세션 토큰, 브라우저 프로필은 프로젝트 파일·상태 JSON·로그·예시·파일명에 저장하거나 Git/GitHub에 커밋하지 않는다. 인증 입력값을 읽거나 되받아 적지 않는다.
-- 첫 수강이거나 사이트의 수강 인정 조건을 확인할 수 없으면 강의는 처음부터 끝까지 1배속으로 재생한다. 전사 시간을 줄이기 위한 이유만으로 배속을 올리지 않는다. 재수강이고 사용자가 명시적으로 요청했으며 사이트가 허용하는 경우에만 다른 배속을 적용한다.
+- 재생 배속은 기본 **1.75배**다. 플레이어가 배속을 지원하면 1.75배로 재생해 녹음 시간을 줄인다(실측에서 large-v3 전사 정확도에 문제가 없었다). 사이트의 수강 인정 조건이 배속을 막거나 사용자가 1배를 요구하면 `--playback-rate 1`로 1배 재생한다. 2배를 넘기지 않는다. 녹음기는 배속을 녹음 옆 `<이름>.recording.json`에 남기고 전사 manifest의 `playback_rate`로 옮긴다. 전사 타임스탬프는 녹음 시간 기준이며 강의 시간은 타임스탬프 × 배속이다.
 - 본 녹음 전에 30초 시험 녹음을 만들고 재생 가능 여부와 음량을 확인한다. 출력 장치가 바뀌거나 다른 앱이 소리를 내면 녹음이 비거나 다른 소리가 섞일 수 있다.
 - 저장소에서 직접 실행하면 녹음 파일은 기본 `input/<lecture_id>/` 아래에 새 타임스탬프 이름으로 저장한다. 저장소 밖 과목 폴더에서 스킬·플러그인으로 호출됐다면 `--output <호출한_폴더의_새_WAV_경로>`를 명시해 현재 과목 폴더를 그대로 입력 자료 폴더로 유지한다. 진행 중에는 `.part.wav` 작업 파일을 사용하고 정상 종료 또는 `Ctrl+C` 중단 시 완성 파일로 바꾼다. 기존 파일은 덮어쓰지 않는다.
 - 가능하면 녹음을 마친 뒤 `manage_run.py init`을 실행한다. 이미 실행 상태가 있으면 `refresh-inputs`로 새 녹음을 반영하고 상태 JSON을 직접 편집하지 않는다.
@@ -17,7 +17,8 @@
 python -m pip install -r requirements-recording.txt
 python scripts/record_lecture.py --list-devices
 python scripts/record_lecture.py --lecture-id <강의ID> --duration 30
-python scripts/record_lecture.py --lecture-id <강의ID>
+python scripts/record_lecture.py --lecture-id <강의ID>                      # 기본 1.75배속 재생 전제
+python scripts/record_lecture.py --lecture-id <강의ID> --playback-rate 1   # 사이트가 배속을 막을 때
 ```
 
 ## 2. 입력 경로

@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 import wave
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -53,6 +53,35 @@ class RecordingResult:
     bytes: int
     started_at: str
     finished_at: str
+    # 재생 배속. 1.75면 녹음 1초가 강의 1.75초다. 전사 타임스탬프는 녹음 시간 기준이다.
+    playback_rate: float = 1.0
+    sidecar: str | None = None
+
+
+DEFAULT_PLAYBACK_RATE = 1.75
+MAX_PLAYBACK_RATE = 2.0
+
+
+def write_recording_sidecar(target: Path, result: "RecordingResult") -> Path:
+    """녹음 옆에 배속·장치 메타데이터를 남긴다. 전사가 읽어 manifest에 옮긴다."""
+    sidecar = target.with_name(target.stem + ".recording.json")
+    payload = {
+        "kind": "lecture_recording_sidecar",
+        "schema_version": 1,
+        "capture_source": result.capture_source,
+        "lecture_id": result.lecture_id,
+        "audio": target.name,
+        "playback_rate": result.playback_rate,
+        "sample_rate": result.sample_rate,
+        "channels": result.channels,
+        "duration_seconds": result.duration_seconds,
+        "lecture_seconds_estimate": round(result.duration_seconds * result.playback_rate, 3),
+        "device_name": result.device_name,
+        "started_at": result.started_at,
+        "finished_at": result.finished_at,
+    }
+    sidecar.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return sidecar
 
 
 def load_pyaudio_backend() -> Any:
@@ -245,11 +274,14 @@ def capture_to_wav(
     duration: float | None = None,
     frames_per_buffer: int = DEFAULT_FRAMES_PER_BUFFER,
     now_factory: Callable[[], datetime] | None = None,
+    playback_rate: float = 1.0,
 ) -> RecordingResult:
     """loopback PCM을 임시 WAV에 기록하고 정상 종료 뒤 최종 경로로 이동한다."""
     ensure_output_available(target)
     if duration is not None and duration <= 0:
         raise ValueError("duration은 0보다 큰 초 단위 값이어야 합니다.")
+    if not (0 < playback_rate <= MAX_PLAYBACK_RATE):
+        raise ValueError(f"playback-rate는 0보다 크고 {MAX_PLAYBACK_RATE} 이하여야 합니다.")
     if frames_per_buffer < 1:
         raise ValueError("frames-per-buffer는 1 이상이어야 합니다.")
 
@@ -352,7 +384,7 @@ def capture_to_wav(
         raise
 
     finished_at = clock()
-    return RecordingResult(
+    result = RecordingResult(
         status="interrupted_saved" if interrupted else "completed",
         capture_source="online_lecture_system_audio",
         lecture_id=lecture_id,
@@ -366,7 +398,10 @@ def capture_to_wav(
         bytes=target.stat().st_size,
         started_at=started_at.isoformat(timespec="seconds"),
         finished_at=finished_at.isoformat(timespec="seconds"),
+        playback_rate=playback_rate,
     )
+    sidecar = write_recording_sidecar(target, result)
+    return replace(result, sidecar=str(sidecar))
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -391,6 +426,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--list-devices",
         action="store_true",
         help="온라인 강의 시스템 오디오용 loopback 장치만 JSON으로 표시",
+    )
+    parser.add_argument(
+        "--playback-rate",
+        type=float,
+        default=DEFAULT_PLAYBACK_RATE,
+        help=(
+            f"강의 재생 배속(기본 {DEFAULT_PLAYBACK_RATE}). 플레이어가 배속을 지원하면 이 값으로 재생하고, "
+            "수강 인정 조건상 막히면 1로 지정한다. 값은 녹음 옆 .recording.json 에 기록되어 전사 manifest로 전달된다."
+        ),
     )
     parser.add_argument("--input-root", type=Path, default=DEFAULT_INPUT_ROOT)
     parser.add_argument("--output", type=Path, help="기본 input/<lecture_id>/... 대신 사용할 .wav 경로")
@@ -417,6 +461,9 @@ def main(
         return 2
     if args.frames_per_buffer < 1:
         print("[오류] --frames-per-buffer는 1 이상이어야 합니다.", file=sys.stderr)
+        return 2
+    if not (0 < args.playback_rate <= MAX_PLAYBACK_RATE):
+        print(f"[오류] --playback-rate는 0보다 크고 {MAX_PLAYBACK_RATE} 이하여야 합니다.", file=sys.stderr)
         return 2
     if not args.list_devices and not args.lecture_id:
         print("[오류] 녹음하려면 --lecture-id가 필요합니다.", file=sys.stderr)
@@ -452,6 +499,11 @@ def main(
         )
         if args.duration is None:
             print("[안내] 녹음을 끝내고 저장하려면 Ctrl+C를 누르십시오.", file=sys.stderr)
+        print(
+            f"[안내] 재생 배속 {args.playback_rate:g}배로 강의를 재생하십시오. "
+            "플레이어가 배속을 막으면 1배로 다시 시작하고 --playback-rate 1 을 지정하십시오.",
+            file=sys.stderr,
+        )
         result = capture_to_wav(
             audio=audio,
             backend=backend,
@@ -461,6 +513,7 @@ def main(
             duration=args.duration,
             frames_per_buffer=args.frames_per_buffer,
             now_factory=now_factory,
+            playback_rate=args.playback_rate,
         )
         print(json.dumps(asdict(result), ensure_ascii=False, indent=2))
         # 무기한 녹음에서는 Ctrl+C가 문서를 닫는 정상 조작이다. 저장에 성공했으면 성공 코드로 끝낸다.
