@@ -35,6 +35,7 @@ SCRIPT_COMMANDS: dict[str, str] = {
     "review-prep": "prepare_transcript_review.py",
     "review-select": "select_review_packets.py",
     "review-apply": "apply_transcript_corrections.py",
+    "prepare-sources": "prepare_source_map.py",
 }
 VALIDATE_TARGETS: dict[str, str] = {
     "setup": "validate_agent_setup.py",
@@ -89,6 +90,7 @@ USAGE = f"""gongbu {__version__} — 과목 폴더에서 쓰는 gongbu-haja 명�
                          재생 배속 기본 1.75 (사이트가 막으면 1). 배속은 녹음 sidecar·전사 manifest에 기록
 
 검수 도구
+  prepare-sources ...    자료 충실형 무손실 원문 묶음·기계적 전사 검사 (모델 호출 없음)
   review-prep ...        전사 용어 후보·검수 패킷 생성
   review-select ...      16KiB 이하 검수 패킷 선택
   review-apply ...       승인된 교정 적용

@@ -13,6 +13,8 @@
 
 ## 반드시 읽을 기준
 
+`faithful`이고 `preprocessing=deterministic`이면 아래 공통 문서 반복 대신 이 역할 프롬프트, `../rules/faithful-cost-path.md`의 품질 계약, 무손실 source map, 최신 초안·coverage·검증 요약과 사용자 제약만 읽는다. source map의 각 단위 **내부**의 정의·예시·단서·평가 조건까지 원문과 대조하고 미검증 음성을 확인된 발언으로 승격하지 않는다. 아래 추가 기준은 일반 `semantic` 경로와 `deep`에 적용한다.
+
 1. `../note_final_rules.md`
 2. `study_note_source_map` JSON과 위험도 높은 원자료 근거 패킷
 3. 최신 원고 및 최종 산출물

@@ -30,11 +30,57 @@ class ManageRunTests(unittest.TestCase):
     def run_cli(self, *arguments: str, expected: int = 0) -> subprocess.CompletedProcess[str]:
         command = list(arguments)
         if command and command[0] == "init":
+            # 기존 상태 전이 시나리오는 과거 semantic 계약을 명시한다.
+            # 신규 기본값과 호환성은 아래 별도 테스트가 raw init으로 확인한다.
+            if "--preprocessing" not in command:
+                command += ["--preprocessing", "semantic"]
             if "--runtime" not in command:
                 command += ["--runtime", "codex"]
             if "--note-mode" not in command:
                 command += ["--note-mode", "faithful"]
         return self.run_raw(*command, expected=expected)
+
+    def test_faithful_defaults_to_two_semantic_roles_and_brief_next(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "lecture.txt").write_text("전제와 결론", encoding="utf-8")
+            result = self.run_raw("init", str(inputs), "--lecture-id", "compact",
+                                  "--root", str(root), "--runtime", "codex", "--note-mode", "faithful")
+            state_file = Path(result.stdout.strip())
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual("deterministic", state["preprocessing"])
+            semantic_roles = [name for name, role in state["roles"].items()
+                              if role["active"] and role["execution"]["executor"] != "python"]
+            self.assertEqual(["writer", "final_reviewer"], semantic_roles)
+            self.assertEqual("python", state["roles"]["transcript_auditor"]["execution"]["executor"])
+            brief = json.loads(self.run_cli("next", str(state_file), "--brief").stdout)
+            self.assertNotIn("execution_profiles", brief)
+            self.assertEqual("source_mapper", brief["ready"][0]["role"])
+            self.assertIsNone(brief["ready"][0]["resolved_profile"])
+            self.run_cli("set-mode", str(state_file), "--note-mode", "deep", "--reason", "사용자 모드 변경")
+            deep = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual("deterministic", deep["preprocessing"])
+            self.assertEqual("python", deep["roles"]["source_mapper"]["execution"]["executor"])
+            self.assertEqual("quality_xhigh", deep["roles"]["final_reviewer"]["execution"]["agent_profile"])
+            (inputs / "lecture.txt").write_text("바뀐 전제", encoding="utf-8")
+            self.run_cli("refresh-inputs", str(state_file))
+            self.run_cli("status", str(state_file))
+
+    def test_legacy_state_without_preprocessing_keeps_semantic_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "input").mkdir()
+            (root / "input" / "lecture.txt").write_text("정의", encoding="utf-8")
+            result = self.run_cli("init", str(root / "input"), "--lecture-id", "legacy", "--root", str(root))
+            path = Path(result.stdout.strip())
+            state = json.loads(path.read_text(encoding="utf-8"))
+            state.pop("preprocessing")
+            path.write_text(json.dumps(state), encoding="utf-8")
+            ready = json.loads(self.run_cli("next", str(path)).stdout)
+            self.assertEqual("semantic", ready["preprocessing"])
+            self.assertEqual("hybrid", ready["ready"][0]["execution"]["executor"])
 
     def run_raw(
         self,

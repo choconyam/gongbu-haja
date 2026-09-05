@@ -45,6 +45,8 @@
 
 ## 4. 공식 역할
 
+새 자료 충실형의 `preprocessing=deterministic` 경로는 `rules/faithful-cost-path.md`를 따른다. 이 경로의 전사 검수 역할은 기계적 검사만, 자료 매핑 역할은 무손실 근거 분할만 수행한다. 음성·의미 미검증 상태를 숨기지 않으며 작성 1개와 독립 최종 검수 1개가 원문을 대조한다. 아래 일반 의미 대응 절차보다 이 경로가 우선하고, 내용 충실성·coverage·최종 검수 게이트는 동일하게 적용한다.
+
 1. `agent_prompts/manager.md` — 전체 작업 관리자
 2. `agent_prompts/transcriber.md` — 강의 녹음 전사 담당
 3. `agent_prompts/transcript_auditor.md` — 전사 검수·교안 정렬 담당

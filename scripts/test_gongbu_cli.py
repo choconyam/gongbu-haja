@@ -102,6 +102,24 @@ class ArgumentInjectionTests(unittest.TestCase):
 
 
 class SubprocessTests(unittest.TestCase):
+    def test_prepare_sources_runs_in_course_folder_with_two_role_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            course = Path(temporary).resolve()
+            inputs = course / "lesson"
+            inputs.mkdir()
+            (inputs / "lecture.txt").write_text("정의와 예시를 모두 보존한다.\n", encoding="utf-8")
+            result = run_gongbu("run", "init", str(inputs), "--lecture-id", "lesson",
+                                "--runtime", "codex", "--note-mode", "faithful", cwd=course)
+            state = Path(result.stdout.strip())
+            prepared = json.loads(run_gongbu("prepare-sources", str(state), "--output-dir",
+                                             str(state.parent / "prepared"), cwd=course).stdout)
+            self.assertEqual(1, prepared["source_files"])
+            self.assertFalse(prepared["semantic_reviewed"])
+            self.assertTrue(Path(prepared["source_map"]).is_file())
+            next_payload = json.loads(run_gongbu("run", "next", str(state), "--brief", cwd=course).stdout)
+            self.assertEqual("deterministic", next_payload["preprocessing"])
+            self.assertNotIn("runtime_model_table", next_payload)
+
     def test_paths_reports_course_folder_as_cwd(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             result = run_gongbu("paths", cwd=Path(temporary))

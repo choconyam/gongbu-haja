@@ -10,6 +10,8 @@
 
 ## 반드시 읽을 기준
 
+`preprocessing=deterministic`에서는 아래 공통 문서 반복 대신 이 역할 프롬프트, `../rules/faithful-cost-path.md`의 품질 계약, source map과 사용자 제약만 읽는다. source map의 `evidence`는 의미 미검증 원문이므로 직접 읽고 자료 대응·예시·조건·ASR 후보를 판단한다. 자동 분할 ID를 보존하며 의미 요약만으로 근거를 대체하지 않는다. 아래 추가 기준은 일반 `semantic` 경로와 `deep`에 적용한다.
+
 1. `../note_final_rules.md`
 2. 자료 매핑 담당의 인벤토리와 대응표
 3. `../rules/workflow.md`

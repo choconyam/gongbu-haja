@@ -177,7 +177,9 @@ PREMIUM_FINAL_REVIEW_ROUTES = {
     },
 }
 
-def role_execution_policy(note_mode: str) -> dict[str, dict[str, Any]]:
+def role_execution_policy(
+    note_mode: str, preprocessing: str = "semantic"
+) -> dict[str, dict[str, Any]]:
     """제작 모드별로 실제 모델 책임을 고정한다.
 
     자료 추출·색인·빌드는 모드와 무관하게 Python/economy 경로를 유지한다.
@@ -193,7 +195,7 @@ def role_execution_policy(note_mode: str) -> dict[str, dict[str, Any]]:
     author_profile = "quality_high"
     author_escalation = "quality_xhigh"
     final_profile = "quality_xhigh" if deep else "review_high"
-    return {
+    policy = {
         "transcriber": {
             "executor": "python",
             "primary_profile": "local_python",
@@ -289,6 +291,30 @@ def role_execution_policy(note_mode: str) -> dict[str, dict[str, Any]]:
             "scope": "검증된 최종 파일의 이동·목록·해시 기록",
         },
     }
+    if preprocessing not in {"semantic", "deterministic"}:
+        raise RunError(f"알 수 없는 전처리 방식입니다: {preprocessing}")
+    if preprocessing == "deterministic":
+        for role, scope in (
+            ("transcript_auditor", "Python 구조·ASR 후보 검사만 수행; 음성·의미 미검증 상태를 작성·최종 검수에 전달"),
+            ("source_mapper", "Python이 모든 원문을 안정 ID·근거 구간으로 분할; 요약·교정·의미 대응은 작성자가 수행"),
+        ):
+            policy[role] = {
+                "executor": "python",
+                "primary_profile": "local_python",
+                "agent_profile": None,
+                "repair_profile": "local_python",
+                "escalation_profile": None,
+                "scope": scope,
+            }
+    return policy
+
+
+def state_execution_policy(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    # 이 필드가 없는 기존 실행은 과거 hybrid 계약을 보존한다.
+    return role_execution_policy(
+        state.get("note_mode", DEFAULT_NOTE_MODE), state.get("preprocessing", "semantic")
+    )
+
 
 ROLE_ORDER = (
     "transcriber",
@@ -532,6 +558,7 @@ def make_roles(
     items: list[dict[str, Any]],
     output_format: str,
     note_mode: str = DEFAULT_NOTE_MODE,
+    preprocessing: str = "semantic",
 ) -> dict[str, dict[str, Any]]:
     if note_mode not in NOTE_MODE_CONFIG:
         raise RunError(f"지원하지 않는 학습노트 제작 모드입니다: {note_mode}")
@@ -607,7 +634,7 @@ def make_roles(
         ["layout_builder", "final_reviewer"],
     )
 
-    execution_policy = role_execution_policy(note_mode)
+    execution_policy = role_execution_policy(note_mode, preprocessing)
     for name, entry in roles.items():
         entry["prompt"] = ROLE_PROMPTS[name]
         entry["execution"] = dict(execution_policy[name])
@@ -899,7 +926,7 @@ def validate_state_shape(state: dict[str, Any]) -> None:
     note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
     if note_mode not in NOTE_MODE_CONFIG:
         raise RunError(f"알 수 없는 학습노트 제작 모드입니다: {note_mode}")
-    expected_execution_policy = role_execution_policy(note_mode)
+    expected_execution_policy = state_execution_policy(state)
     roles = state.get("roles")
     if not isinstance(roles, dict) or set(roles) != set(ROLE_ORDER):
         raise RunError("실행 상태의 역할 목록이 현재 프로젝트와 일치하지 않습니다.")
@@ -1196,6 +1223,7 @@ def rebuild_roles_after_input_change(
         new_items,
         state["output_format"],
         state.get("note_mode", DEFAULT_NOTE_MODE),
+        state.get("preprocessing", "semantic"),
     )
     apply_role_overrides(new_roles, state.get("role_overrides", {}))
 
@@ -1255,7 +1283,10 @@ def rebuild_roles_after_mode_change(
     """전사·자료 매핑은 보존하고 집필 이후 역할만 새 제작 모드로 다시 계획한다."""
 
     old_roles = state["roles"]
-    new_roles = make_roles(state["inputs"], state["output_format"], new_mode)
+    new_roles = make_roles(
+        state["inputs"], state["output_format"], new_mode,
+        state.get("preprocessing", "semantic"),
+    )
     apply_role_overrides(new_roles, state.get("role_overrides", {}))
     affected = role_descendants(old_roles, {"writer"}) | role_descendants(new_roles, {"writer"})
 
@@ -1335,6 +1366,9 @@ def locked_init(
     if state_file.exists():
         raise RunError(f"이미 실행 상태가 있습니다. 덮어쓰지 않았습니다: {state_file}")
     timestamp = now_iso()
+    preprocessing = getattr(args, "preprocessing", None) or (
+        "deterministic" if args.note_mode == "faithful" else "semantic"
+    )
     state = {
         "schema_version": SCHEMA_VERSION,
         "lecture_id": args.lecture_id,
@@ -1347,6 +1381,7 @@ def locked_init(
         "output_format": args.output_format,
         "output_format_explicit": args.output_format_explicit,
         "note_mode": args.note_mode,
+        "preprocessing": preprocessing,
         "mode_contract": NOTE_MODE_CONFIG[args.note_mode],
         "runtime": runtime,
         "runtime_model_table": runtime_table(runtime),
@@ -1369,7 +1404,7 @@ def locked_init(
         "execution_profiles": EXECUTION_PROFILES,
         "cost_policy": COST_POLICY,
         "cost_usage": new_cost_usage(),
-        "roles": make_roles(items, args.output_format, args.note_mode),
+        "roles": make_roles(items, args.output_format, args.note_mode, preprocessing),
         "events": [{"at": timestamp, "event": "initialized", "detail": f"입력 {len(items)}개"}],
     }
     write_json(state_file, state)
@@ -1392,7 +1427,7 @@ def command_status(args: argparse.Namespace) -> int:
         f"완성본 고비용 검수: 누적 {len(premium_reviews)}회 | "
         f"현재 review cycle {state.get('review_cycle', 1)}"
     )
-    execution_policy = role_execution_policy(note_mode)
+    execution_policy = state_execution_policy(state)
     for role in ROLE_ORDER:
         entry = state["roles"][role]
         active = "활성" if entry["active"] else "비활성"
@@ -1410,7 +1445,7 @@ def command_next(args: argparse.Namespace) -> int:
     state = read_state(state_file)
     refresh_statuses(state["roles"])
     note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
-    execution_policy = role_execution_policy(note_mode)
+    execution_policy = state_execution_policy(state)
     ready = []
     for role in ROLE_ORDER:
         entry = state["roles"][role]
@@ -1433,25 +1468,27 @@ def command_next(args: argparse.Namespace) -> int:
                     ),
                 }
             )
+    payload = {
+        "state": str(state_file),
+        # 관리자가 역할 프롬프트·규칙을 읽을 실제 위치(설치본이면 패키지 안 engine/).
+        "engine_root": str(ENGINE_ROOT),
+        "prompt_root": str(ENGINE_ROOT / "agent_prompts"),
+        "note_mode": note_mode,
+        "preprocessing": state.get("preprocessing", "semantic"),
+        "mode_contract": NOTE_MODE_CONFIG[note_mode],
+        "runtime": state.get("runtime"),
+        "runtime_model_table": state.get("runtime_model_table"),
+        "execution_profiles": state.get("execution_profiles", EXECUTION_PROFILES),
+        "cost_policy": state.get("cost_policy", COST_POLICY),
+        "cost_usage": state.get("cost_usage", new_cost_usage()),
+        "ready": ready,
+    }
+    if getattr(args, "brief", False):
+        for key in ("runtime_model_table", "execution_profiles", "cost_policy", "cost_usage"):
+            payload.pop(key, None)
     print(
         json.dumps(
-            {
-                "state": str(state_file),
-                # 관리자가 역할 프롬프트·규칙을 읽을 실제 위치(설치본이면 패키지 안 engine/).
-                "engine_root": str(ENGINE_ROOT),
-                "prompt_root": str(ENGINE_ROOT / "agent_prompts"),
-                "note_mode": note_mode,
-                "mode_contract": NOTE_MODE_CONFIG[note_mode],
-                "runtime": state.get("runtime"),
-                "runtime_model_table": state.get("runtime_model_table"),
-                "execution_profiles": state.get("execution_profiles", EXECUTION_PROFILES),
-                "cost_policy": state.get("cost_policy", COST_POLICY),
-                "cost_usage": state.get(
-                    "cost_usage",
-                    new_cost_usage(),
-                ),
-                "ready": ready,
-            },
+            payload,
             ensure_ascii=False,
             indent=2,
         )
@@ -2391,6 +2428,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_parser = subparsers.add_parser("init", help="입력 해시와 선택적 역할 실행 계획을 만듭니다.")
     init_parser.add_argument("input_dir", type=Path)
+    init_parser.add_argument(
+        "--preprocessing", choices=("deterministic", "semantic"), default=None,
+        help="생략 시 faithful은 로컬 전처리, deep은 의미 대응. 기존 실행은 저장된 방식을 유지한다.",
+    )
     init_parser.add_argument("--lecture-id", required=True)
     init_parser.add_argument(
         "--output-format",
@@ -2435,6 +2476,8 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("state", type=Path)
         if name == "verify":
             command_parser.add_argument("--check-inputs", action="store_true")
+        if name == "next":
+            command_parser.add_argument("--brief", action="store_true", help="전체 모델표·원장 없이 준비 역할만 출력")
         command_parser.set_defaults(func=func)
 
     activate_parser = subparsers.add_parser("activate", help="조건부 역할을 활성화합니다.")

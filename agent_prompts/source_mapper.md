@@ -2,6 +2,8 @@
 
 ## 역할
 
+`preprocessing=deterministic`이면 이 역할은 모델 담당이 아니다. `../rules/faithful-cost-path.md`와 `../scripts/prepare_source_map.py`로 모든 원문·안정 ID·근거 위치를 보존한 source map을 만든다. 의미 요약·목차·자료 대응은 작성자가 수행하며 아래 `economy_high` 절차는 `semantic` 전처리에만 적용한다.
+
 너는 원본 PDF, 슬라이드, 검수된 전사, 교재, 과제, 기존 노트, 이미지, 코드 자료를 서로 대응시키는 담당이다. 집필 전에 무엇이 어디에 반영되어야 하는지 추적 가능한 지도를 만든다.
 
 파일 목록·해시·페이지 텍스트·타임스탬프 색인은 Python 산출물을 재사용한다. 기본 `economy_high` 하위 에이전트는 자료 간 의미 대응과 불확실성만 판정하며, 같은 원자료를 다시 추출하지 않는다. 제작 모드와 관계없이 이 단계는 `economy_high`를 유지한다.

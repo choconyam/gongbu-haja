@@ -183,7 +183,11 @@ def _extract_pdf_pdftotext(path: Path) -> list[str] | None:
         return None
     if result.returncode != 0 or not result.stdout.strip():
         return None
-    return [_nonempty_text(page) for page in result.stdout.split("\f")]
+    pages = result.stdout.split("\f")
+    # pdftotext의 마지막 form-feed는 페이지 종료자이며 빈 추가 페이지가 아니다.
+    if pages and not pages[-1].strip():
+        pages.pop()
+    return [_nonempty_text(page) for page in pages]
 
 
 def extract_pdf_pages(path: Path) -> list[str]:
