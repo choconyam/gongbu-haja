@@ -2147,7 +2147,8 @@ def record_patched_artifact(state: dict[str, Any], path: Path) -> str:
     final_reviewer.md는 발견한 국소 문제를 같은 호출 안에서 고치라고 하므로, 고친 파일이
     통과 역할의 기록된 산출물이면 새 해시를 기록해 verify가 변조로 보지 않게 한다.
     """
-    upstream = upstream_roles(state["roles"], "final_reviewer")
+    # 조판은 검수의 선행이 아니지만 패치된 초안에서 다시 만든 산출물이므로 함께 재기록한다.
+    upstream = upstream_roles(state["roles"], "final_reviewer") | {"layout_builder"}
     for name in ROLE_ORDER:
         other = state["roles"][name]
         if other.get("status") != "passed":

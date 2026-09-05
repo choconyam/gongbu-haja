@@ -1333,6 +1333,28 @@ class ManageRunTests(unittest.TestCase):
             )
             self.assertIn("시작할 수 없는 상태", misuse.stderr)
 
+    def test_patched_accepts_layout_artifact_rebuilt_from_patched_draft(self) -> None:
+        # 조판은 검수의 선행이 아니지만, 패치된 초안으로 다시 만든 조판 산출물도 --patched 로 재기록할 수 있어야 한다.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state_file, source_map, draft = self._run_until_writer("patched-layout", root)
+            pdf = self._complete_layout(state_file)
+            self.run_cli("start", str(state_file), "--role", "final_reviewer")
+            draft.write_text("# 초안\n\n국소 수정", encoding="utf-8")
+            pdf.write_bytes(b"%PDF-1.4 rebuilt from patched draft")
+            report = state_file.parent / "final_review.md"
+            report.write_text("통과", encoding="utf-8")
+            coverage = self.write_coverage(state_file, "faithful")
+            self.run_cli(
+                "complete", str(state_file), "--role", "final_reviewer",
+                "--artifact", str(report), "--source-map", str(source_map), "--coverage-report", str(coverage),
+                "--patched", str(draft), "--patched", str(pdf),
+            )
+            self.run_raw("verify", str(state_file), "--check-inputs")
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(hashlib.sha256(pdf.read_bytes()).hexdigest(), state["roles"]["layout_builder"]["artifacts"][0]["sha256"])
+            self.assertEqual(2, len(state["cost_usage"]["premium_final_reviews"][0]["patched_artifacts"]))
+
     def test_repair_reopens_writer_after_review_rejection_and_is_limited(self) -> None:
         # 검수 반려 → repair 로 집필을 다시 열고 새 cycle 에서 다시 검수한다. rerun 은 여전히 거부된다.
         with tempfile.TemporaryDirectory() as temporary:

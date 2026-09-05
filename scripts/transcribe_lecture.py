@@ -566,9 +566,16 @@ def perform_transcription(
             last_error = exc
             if index + 1 < len(plan.attempts):
                 next_model, next_device, next_compute = plan.attempts[index + 1]
+                hint = ""
+                if device != "cpu" and any(token in str(exc).lower() for token in ("cublas", "cudnn", "cuda", "nvrtc")):
+                    hint = (
+                        " | CUDA 런타임 휠이 없는 환경으로 보입니다. 전사 환경에 "
+                        "nvidia-cublas-cu12·nvidia-cudnn-cu12·nvidia-cuda-nvrtc-cu12 를 설치하면 GPU를 씁니다"
+                        " (pipx 설치본: pipx inject gongbu-haja nvidia-cublas-cu12 nvidia-cudnn-cu12 nvidia-cuda-nvrtc-cu12)."
+                    )
                 print(
                     f"[경고] {device} 전사 실패. {next_device} {next_model}({next_compute})로 "
-                    f"전체 전사를 다시 시도합니다: {exc}",
+                    f"전체 전사를 다시 시도합니다: {exc}{hint}",
                     file=sys.stderr,
                 )
                 continue
@@ -873,6 +880,12 @@ def main() -> int:
 
     print("[완료] 강의 전사 초안과 메타데이터를 생성했습니다.")
     print(f"  - 출력 폴더: {paths.output_dir}")
+    if used_attempt != plan.attempts[0]:
+        print(
+            f"  - [주의] 계획한 {plan.attempts[0][0]}({plan.attempts[0][1]}) 대신 "
+            f"{used_attempt[0]}({used_attempt[1]})로 전사됐습니다. 정확도가 낮을 수 있으니 "
+            "manifest의 model_fallback 을 확인하고, GPU 환경을 고친 뒤 --force 로 다시 전사하는 것을 권합니다."
+        )
     print("  - 다음 단계: 전사 검수 담당이 녹음·전사·교안을 대조해야 합니다.")
     return 0
 
