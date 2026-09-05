@@ -72,6 +72,8 @@ NOTE_MODE_CONFIG = {
         "description": "필요한 배경지식·중간 사고·유도 과정·예시를 보강하고 보강 내용을 원자료와 구분함",
         "external_enrichment": True,
         "pedagogy_editor_default": True,
+        "output_rules": "rules/deep-output-contract.md",
+        "pdf_build": "--note-mode deep; authored TeX body; XeLaTeX; full-page visual QA",
     },
 }
 NOTE_MODES = tuple(NOTE_MODE_CONFIG)
@@ -261,7 +263,10 @@ def role_execution_policy(note_mode: str) -> dict[str, dict[str, Any]]:
             "agent_profile": None,
             "repair_profile": "local_python",
             "escalation_profile": None,
-            "scope": "scripts/build_study_note_pdf.py 결정적 빌드·구조 검사·렌더 표본 확인",
+            "scope": (
+                "scripts/build_study_note_pdf.py --note-mode deep: 승인 원고와 TeX 동등성 대조·XeLaTeX 빌드·전체 쪽 및 수식·슬라이드 시각 검수"
+                if deep else "scripts/build_study_note_pdf.py 결정적 빌드·구조 검사·렌더 표본 확인"
+            ),
         },
         "final_reviewer": {
             "executor": "subagent",
@@ -1303,6 +1308,7 @@ def command_init(args: argparse.Namespace) -> int:
         raise RunError(f"이미 실행 상태가 있습니다. 덮어쓰지 않았습니다: {state_file}")
     # 입력 검증과 해시 계산은 락·폴더 생성 전에 끝내, 실패한 init이
     # 빈 workspace/<강의ID>/ 폴더를 남기지 않게 한다.
+    args.output_format_explicit = args.output_format is not None
     if args.output_format is None:
         args.output_format = DEFAULT_OUTPUT_FORMATS[args.note_mode]
     runtime = args.runtime or detect_runtime()
@@ -1339,6 +1345,7 @@ def locked_init(
         "state_root": str(state_file.parent.parent),
         "engine_root": str(ENGINE_ROOT),
         "output_format": args.output_format,
+        "output_format_explicit": args.output_format_explicit,
         "note_mode": args.note_mode,
         "mode_contract": NOTE_MODE_CONFIG[args.note_mode],
         "runtime": runtime,
@@ -1886,6 +1893,9 @@ def command_set_mode(args: argparse.Namespace) -> int:
             )
             return 0
 
+        # Preserve explicit choices and older states whose choice origin is unknown.
+        if state.get("output_format_explicit") is False:
+            state["output_format"] = DEFAULT_OUTPUT_FORMATS[args.note_mode]
         state["roles"] = rebuild_roles_after_mode_change(state, args.note_mode)
         state["note_mode"] = args.note_mode
         state["mode_contract"] = NOTE_MODE_CONFIG[args.note_mode]

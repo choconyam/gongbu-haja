@@ -14,9 +14,11 @@
   | 프로필 | Codex | Claude Code |
   |---|---|---|
   | `economy_high` | `gpt-5.6-luna` / `high` | `claude-sonnet-5` / `high` |
-  | `review_high` | `gpt-5.6-sol` / `high` | `claude-opus-5` / `high` |
-  | `quality_high` | `gpt-5.6-sol` / `high` | `claude-opus-5` / `high` |
-  | `quality_xhigh` | `gpt-5.6-sol` / `xhigh` | `claude-opus-5` / `xhigh` |
+  | `review_high` | `gpt-6-astra` / `high` | `claude-opus-5` / `high` |
+  | `quality_high` | `gpt-6-astra` / `medium` | `claude-opus-5` / `high` |
+  | `quality_xhigh` | `gpt-6-astra` / `high` | `claude-opus-5` / `xhigh` |
+
+  `quality_high`·`quality_xhigh`는 상태 호환용 프로필 이름이며 실제 추론 강도 이름이 아니다. Codex에서는 두 모드의 집필·통합·보강에 Astra medium, 최종 검수에 Astra high를 사용한다. 기존 실행은 저장된 모델표 스냅샷을 계속 사용한다. 비교용 집필이나 추가 모델 검수를 실행하지 않으며 모델 간 비용·속도 우위를 가정하지 않는다.
 
   Codex의 Terra와 Claude의 Haiku는 표에 두지 않는다. 모델은 별칭이 아니라 전체 ID로 고정한다. 새 모델이 나와도 자동으로 바뀌지 않으며, 검증을 거친 뒤 표를 갱신해야 사용감이 바뀐다.
 
@@ -88,6 +90,8 @@ Python이 만든 후보를 확정 사실로 승격하지 않는다. 자동 치�
 | `maintainer` | Python | 없음 | 없음 |
 
 ## 3. 최소 실행 경로
+
+`deep`의 출력 계약은 `deep-output-contract.md`를 따른다. 승인 원고의 TeX 조판 동등성을 확인한 뒤 `../scripts/build_study_note_pdf.py`에 `--note-mode deep`으로 전달한다. Python 컴파일 뒤 모든 쪽의 렌더와 수식·슬라이드 가독성을 확인하며, 일반 Markdown PDF 경로로 대체하지 않는다. 의미 검수의 프로필·횟수·병렬 구조와 `faithful` 기본 Markdown 경로는 바꾸지 않는다.
 
 항상 실행하는 실제 역할은 다음으로 제한한다.
 

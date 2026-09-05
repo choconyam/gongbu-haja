@@ -82,7 +82,9 @@ USAGE = f"""gongbu {__version__} — 과목 폴더에서 쓰는 gongbu-haja 명�
                          상태 파일을 <과목>/{STATE_DIR_NAME}/<ID>/run_state.json 에 만든다
   run next|start|complete|fail|repair|escalate|... <run_state.json> ...
   build <초안.md> --output <노트.md|PDF> --course <과목> --session <차시> [--summary ...]
-                         결정적 조판 (추적 주석 제거, 내용 불변). .md 출력은 1초, PDF는 reportlab 필요
+                         경량형 기존 경로: .md는 추적 주석 제거, 명시적 PDF는 reportlab 필요
+  build <본문.tex> --note-mode deep --output <노트.pdf> --course <과목> --session <차시> [--summary ...]
+                         DEEP 최소 조판: XeLaTeX·한글 글꼴 필요. 승인 원고의 TeX 본문을 준비한 뒤 실행
   record ... --playback-rate 1.75
                          재생 배속 기본 1.75 (사이트가 막으면 1). 배속은 녹음 sidecar·전사 manifest에 기록
 

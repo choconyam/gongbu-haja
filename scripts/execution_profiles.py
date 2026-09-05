@@ -41,7 +41,7 @@ EXECUTION_PROFILES: dict[str, dict[str, Any]] = {
     "quality_high": {
         "executor": "subagent",
         "agent": "quality_note_worker",
-        "description": "심화 집필·통합 또는 자료 충실형의 국소 의미 충돌 해결",
+        "description": "두 모드의 집필·통합·보강 및 제한된 의미 충돌 해결",
     },
     "quality_xhigh": {
         "executor": "subagent",
@@ -58,12 +58,15 @@ EXECUTION_PROFILES: dict[str, dict[str, Any]] = {
 # 거친 뒤 이 표를 갱신해야만 적용된다. Claude의 `effort`는 Claude Code 서브
 # 에이전트 frontmatter 등급(low/medium/high/xhigh/max)이다. Haiku는 의미 작업
 # 품질을 보장하기 어려워 표에 두지 않는다.
+# 프로필 이름은 상태 호환용 역할 등급이며 실제 reasoning effort와 같을 필요는 없다.
+# Codex 집필·보강은 Astra medium, 두 모드의 최종 검수는 Astra high.
+# Claude 모델표는 유지한다. 모델 간 비용·속도 우위를 가정하지 않는다.
 RUNTIME_MODEL_TABLES: dict[str, dict[str, dict[str, str]]] = {
     "codex": {
         "economy_high": {"model": "gpt-5.6-luna", "effort": "high"},
-        "review_high": {"model": "gpt-5.6-sol", "effort": "high"},
-        "quality_high": {"model": "gpt-5.6-sol", "effort": "high"},
-        "quality_xhigh": {"model": "gpt-5.6-sol", "effort": "xhigh"},
+        "review_high": {"model": "gpt-6-astra", "effort": "high"},
+        "quality_high": {"model": "gpt-6-astra", "effort": "medium"},
+        "quality_xhigh": {"model": "gpt-6-astra", "effort": "high"},
     },
     "claude": {
         "economy_high": {"model": "claude-sonnet-5", "effort": "high"},
@@ -84,9 +87,9 @@ EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 # 같은 원문을 공유하도록 여기에만 둔다.
 AGENT_DESCRIPTIONS: dict[str, str] = {
     "study_note_worker": (
-        "Runs bounded routine semantic work and faithful-mode drafting after deterministic Python preprocessing."
+        "Runs bounded transcript review and source mapping after deterministic Python preprocessing; does not author notes."
     ),
-    "quality_note_worker": "Authors deep-mode sections and resolves bounded high-value semantic conflicts.",
+    "quality_note_worker": "Authors faithful and deep notes, integrates explanations, and resolves bounded semantic conflicts.",
     "faithful_note_reviewer": (
         "Independently checks faithful-mode notes for source coverage, omission, distortion, and duplication."
     ),
@@ -98,10 +101,11 @@ AGENT_INSTRUCTIONS: dict[str, str] = {
 Do not scan the full repository, full conversation, full transcript, or every source unless the manager supplies an exact unresolved range that requires it.
 Reuse Python-produced extraction, hashes, indexes, validation results, and context packets instead of recreating them.
 Make semantic judgments only within the assigned role. Write only the assigned artifact, preserve source pointers, and return unresolved items explicitly.
-For faithful drafting, use only the supplied course sources and reviewed instructor material. Do not add external background, new examples, or new derivations.
+Do not author notes or make final-review judgments; the manager assigns those roles to separate authoring and review profiles.
 Do not rerun the whole role after a local failure; request the exact missing page, section, or timestamp.
 """,
     "quality_note_worker": """Read only the assigned role prompt, deterministic source packet, predecessor artifact, mode contract, and output path.
+For faithful-mode authoring, use only the supplied course sources and reviewed instructor material. Preserve examples, caveats, corrections, and emphasis without adding outside background, new examples, or derivations.
 For deep-mode authoring, restore prerequisite context, causal links, intermediate reasoning, derivations, examples, and application conditions only where they improve understanding.
 Keep course-source content, reviewed instructor explanations, and supplemental knowledge distinguishable. Verify supplemental claims and preserve uncertainty.
 For a faithful-mode escalation, resolve only the supplied ambiguity or source conflict; do not broaden the note or reread unrelated material.

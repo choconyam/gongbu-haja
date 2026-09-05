@@ -277,7 +277,19 @@ Python 통과는 내용이 좋다는 뜻이 아니다. 자동 검사는 기계�
 - 원자료의 페이지·타임스탬프 포인터를 보존하고 같은 내용을 역할마다 다시 요약하지 않는다.
 - 입력과 산출물 해시가 같으면 검증된 중간 결과를 재사용한다.
 - 검수 실패 시 전체를 처음부터 돌리지 않고 관련 역할과 그 뒤 단계만 다시 실행한다(`manage_run.py repair`, 강의당 2회).
-- 조판은 모델을 부르지 않는다. `scripts/build_study_note_pdf.py`가 초안을 그대로 PDF로 만들고, 최종 검수는 조판을 기다리지 않고 집필 직후 병렬로 돈다. 전사를 제외한 노트 한 편의 목표 소요는 10~15분이다.
+- `faithful` 기본 Markdown은 Python이 추적 주석만 제거해 만든다. `deep` PDF는 승인 원고를 TeX로 옮겨 내용 동등성을 확인한 뒤 Python으로 컴파일한다. 최종 의미 검수는 조판과 병렬로 진행하며, TeX 변환·원고 대조·시각 확인에는 별도 작업이 필요하다.
+
+### DEEP PDF 출력
+
+`deep`은 원본 슬라이드 바로 아래에 쉬운 설명과 필요한 중간 유도를 배치한다. 수식은 교과서식으로 조판하고, 자동 목차·장식 박스·머리말·꼬리말·요청하지 않은 문제나 요약 부록은 넣지 않는다. 최종 전달 전에 원고와 TeX의 내용 동등성 및 PDF 모든 쪽의 가독성을 확인한다. 세부 기준은 [DEEP 출력 계약](rules/deep-output-contract.md)에 있다.
+
+```powershell
+gongbu build <본문.tex> --note-mode deep --output <노트.pdf> --course <과목> --session <차시> --summary <파트내용한줄>
+```
+
+TeX 본문은 사전에 준비해야 한다. XeLaTeX, `fontspec`, `xetexko`, `amsmath`, `amssymb`, `graphicx`, `geometry`와 한글 글꼴이 필요하며 빌더는 이를 자동 설치하지 않는다. `pip install gongbu-haja[pdf]`는 Python PDF 도구만 설치한다. 환경이 없거나 수식·글꼴 오류가 나면 빌드를 중단하고 기존 PDF를 보존한다.
+
+`faithful`의 기본 출력은 Markdown이며, PDF를 명시하면 기존 빌더를 사용한다. 기본 형식으로 시작한 실행은 `set-mode` 때 새 모드의 기본 형식을 따르고, 사용자가 지정한 형식은 유지한다.
 
 ### 역할별 실행 비용 정책
 
@@ -289,7 +301,9 @@ Python 통과는 내용이 좋다는 뜻이 아니다. 자동 검사는 기계�
 - 표에 없는 상위 모델은 기본 경로에 두지 않는다. 고강도 모델은 작성·최종 검수 또는 16KiB 이하의 실제 미해결 패킷에만 사용하며, 역할 전체 자동 재시도는 하지 않는다.
 - 동시에 실행하는 하위 에이전트는 최대 2개다. 병렬화 때문에 같은 원자료를 여러 번 입력하지 않는다.
 
-런타임별 모델표는 `scripts/execution_profiles.py` 한 곳에 있다(현재 Codex는 Luna/Sol, Claude Code는 Sonnet 5/Opus 5를 전체 ID로 고정 — 새 모델은 검증 후 표를 갱신해야 적용). `.codex/`(설정과 역할 TOML 4개)와 `.claude/agents/`(서브 에이전트 4개)는 `scripts/sync_runtime_agents.py`가 그 표에서 생성하므로 직접 고치지 않는다. `manage_run.py init`은 실행 런타임을 환경에서 감지해(감지 실패 시 `--runtime codex|claude` 명시) 그 표의 스냅샷을 상태에 기록하고, 이후 `next`·`escalate`가 프로필을 실제 모델·effort로 해석해 돌려준다. 두 런타임의 등급은 대응이지 등가가 아니다.
+런타임별 모델표는 `scripts/execution_profiles.py` 한 곳에 있다. Codex는 두 모드 모두 Astra medium으로 집필·보강하고 Astra high로 최종 검수하며, 제한된 전사 검수·자료 대응은 Luna high를 사용한다. Claude Code의 Sonnet 5/Opus 5 배정은 유지한다. 모델은 전체 ID로 고정하며 실제 비용·속도 우위를 가정하지 않는다.
+
+`.codex/`(설정과 역할 TOML 4개)와 `.claude/agents/`(서브 에이전트 4개)는 `scripts/sync_runtime_agents.py`가 모델표에서 생성하므로 직접 고치지 않는다. `manage_run.py init`은 실행 런타임을 환경에서 감지해(감지 실패 시 `--runtime codex|claude` 명시) 그 표의 스냅샷을 상태에 기록하고, 이후 `next`·`escalate`가 프로필을 실제 모델·effort로 해석해 돌려준다. 프로필 이름의 high/xhigh는 실제 effort를 강제하지 않으며 두 런타임의 등급은 대응이지 등가가 아니다. 기존 실행은 저장된 스냅샷을 유지한다.
 
 ## 입력
 
@@ -645,4 +659,3 @@ python -m pip install -r requirements-transcription.txt
 ## 라이선스
 
 MIT — 저장소의 `LICENSE` 파일을 참조한다.
-

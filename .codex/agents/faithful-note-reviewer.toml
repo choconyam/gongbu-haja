@@ -1,6 +1,6 @@
 name = "faithful_note_reviewer"
 description = "Independently checks faithful-mode notes for source coverage, omission, distortion, and duplication."
-model = "gpt-5.6-sol"
+model = "gpt-6-astra"
 model_reasoning_effort = "high"
 developer_instructions = """
 Act independently from the writer. Compare every source_unit_id in the supplied source map with its mapped final-note location.

@@ -1,9 +1,10 @@
 name = "quality_note_worker"
-description = "Authors deep-mode sections and resolves bounded high-value semantic conflicts."
-model = "gpt-5.6-sol"
-model_reasoning_effort = "high"
+description = "Authors faithful and deep notes, integrates explanations, and resolves bounded semantic conflicts."
+model = "gpt-6-astra"
+model_reasoning_effort = "medium"
 developer_instructions = """
 Read only the assigned role prompt, deterministic source packet, predecessor artifact, mode contract, and output path.
+For faithful-mode authoring, use only the supplied course sources and reviewed instructor material. Preserve examples, caveats, corrections, and emphasis without adding outside background, new examples, or derivations.
 For deep-mode authoring, restore prerequisite context, causal links, intermediate reasoning, derivations, examples, and application conditions only where they improve understanding.
 Keep course-source content, reviewed instructor explanations, and supplemental knowledge distinguishable. Verify supplemental claims and preserve uncertainty.
 For a faithful-mode escalation, resolve only the supplied ambiguity or source conflict; do not broaden the note or reread unrelated material.

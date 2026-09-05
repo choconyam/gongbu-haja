@@ -48,6 +48,7 @@ RULE_FILES = (
     "orchestration.md",
     "transcription-workflow.md",
     "note-production-modes.md",
+    "deep-output-contract.md",
     "content-modes.md",
     "output-and-layout.md",
     "review-checklists.md",

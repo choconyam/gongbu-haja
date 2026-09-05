@@ -8,8 +8,9 @@
     python scripts/build_study_note_pdf.py work/note_draft.md --output output/노트.pdf \
         --course "미디어빅뱅과방송" --session "1주차 2차시" --summary "미디어의 개념과 사회적 기능"
 
-글꼴은 Windows에 흔한 한글 TrueType을 순서대로 찾는다(한컴 → 맑은 고딕). 다른 OS에서는
-`--font-body` / `--font-head` 로 TTF 경로를 직접 준다.
+기존 PDF 경로의 글꼴은 Windows 한글 TrueType을 순서대로 찾는다. 다른 OS에서는
+`--font-body` / `--font-head` 로 TTF 경로를 준다. DEEP PDF는 --note-mode deep과
+TeX 본문을 받아 build_deep_pdf.py의 최소 디자인 XeLaTeX 경로로 조판한다.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import argparse
 import html
 import re
 import sys
+import subprocess
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -463,7 +465,10 @@ def build(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="학습노트 Markdown을 A4 PDF로 결정적으로 조판합니다.")
-    parser.add_argument("source", type=Path, help="집필 초안 또는 최종본 Markdown")
+    parser.add_argument("source", type=Path, help="Markdown 초안 또는 DEEP용 TeX 본문 조각")
+    parser.add_argument("--note-mode", choices=("faithful", "deep"), default=None,
+                        help="deep PDF는 최소 디자인 XeLaTeX 경로. faithful/생략은 기존 경로 유지.")
+    parser.add_argument("--tex-korean-font", default=None, help="DEEP용 설치된 한글 글꼴 이름(선택)")
     parser.add_argument("--output", type=Path, required=True, help="만들 PDF 경로")
     parser.add_argument("--course", required=True, help="과목명(표지·머리글)")
     parser.add_argument("--session", required=True, help="차시 표기(예: 1주차 2차시)")
@@ -500,11 +505,38 @@ def main(argv: list[str] | None = None) -> int:
     if not source.is_file():
         print(f"[오류] 원고가 없습니다: {source}", file=sys.stderr)
         return 2
+    if source == output:
+        print("[오류] 원고와 출력 경로는 달라야 합니다.", file=sys.stderr)
+        return 2
     if output.exists() and not args.force:
         print(f"[오류] 기존 출력을 덮어쓰지 않습니다(--force 로 교체): {output}", file=sys.stderr)
         return 2
     if output_format == "md":
+        if args.note_mode == "deep" and output.suffix.lower() != ".md":
+            print("[오류] DEEP의 명시적 Markdown 출력은 .md 경로를 사용하십시오.", file=sys.stderr)
+            return 2
+        if source.suffix.lower() == ".tex":
+            print("[오류] TeX 입력을 Markdown으로 복사하지 않습니다.", file=sys.stderr)
+            return 2
         print(write_markdown(source, output, args.course, args.session))
+        return 0
+    if args.note_mode == "deep" or source.suffix.lower() == ".tex":
+        if source.suffix.lower() != ".tex" or output.suffix.lower() != ".pdf":
+            print("[오류] DEEP PDF에는 .tex 본문과 .pdf 출력이 필요합니다. 승인 원고를 내용 변경 없이 조판하십시오.", file=sys.stderr)
+            return 2
+        if args.meta or args.kicker != "STUDY NOTE" or args.font_body or args.font_head:
+            print("[오류] DEEP은 장식 메타·kicker·TTF 옵션을 쓰지 않습니다. --tex-korean-font를 사용하십시오.", file=sys.stderr)
+            return 2
+        try:
+            try:
+                from .build_deep_pdf import build_deep
+            except ImportError:
+                from build_deep_pdf import build_deep
+            build_deep(source, output, args.course, args.session, args.summary, args.tex_korean_font)
+        except (ValueError, OSError, subprocess.SubprocessError) as exc:
+            print(f"[오류] {exc}", file=sys.stderr)
+            return 2
+        print(output)
         return 0
     if REPORTLAB_ERROR is not None:
         print("[오류] reportlab이 없습니다. `python -m pip install reportlab` 후 다시 실행하십시오.", file=sys.stderr)

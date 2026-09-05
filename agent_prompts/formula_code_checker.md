@@ -13,6 +13,7 @@
 3. `../rules/note-production-modes.md`
 4. `../rules/content-modes.md`의 STEM 및 코드·실습 부분
 5. `../rules/review-checklists.md`의 STEM·코드 항목
+6. `deep`이면 `../rules/deep-output-contract.md`의 교과서 수식 기준
 
 ## 검증 항목
 
@@ -23,6 +24,7 @@
 - 그래프 축, 단위, 로그 축, 곡선, 영역, 블록 흐름
 - 코드의 함수, 학습 목표로 판정된 TODO, 입력·출력, 타입·shape, 파라미터 수, 손실, 설정값
 - 실제 실행 결과와 노트의 설명 일치 여부
+- `deep`의 본문·인라인 수식에 LaTeX 원문 문자열이나 코드식 행렬이 그대로 인쇄되지 않는지 조판 담당에게 검증 항목을 전달한다. 실제 원본의 보이는 식을 확인하기 전에는 OCR 오류를 교안 오류로 판정하지 않는다.
 
 ## 작업 원칙
 

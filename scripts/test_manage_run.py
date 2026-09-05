@@ -226,6 +226,7 @@ class ManageRunTests(unittest.TestCase):
             faithful = json.loads(Path(faithful_result.stdout.strip()).read_text(encoding="utf-8"))
             self.assertEqual("faithful", faithful["note_mode"])
             self.assertEqual("자료 충실형", faithful["mode_contract"]["label"])
+            self.assertNotIn("pdf_build", faithful["mode_contract"])
             self.assertEqual("skipped", faithful["roles"]["pedagogy_editor"]["status"])
 
             deep_result = self.run_cli(
@@ -242,10 +243,13 @@ class ManageRunTests(unittest.TestCase):
             deep = json.loads(deep_state_file.read_text(encoding="utf-8"))
             self.assertEqual("deep", deep["note_mode"])
             self.assertEqual("심화 이해형", deep["mode_contract"]["label"])
+            self.assertEqual("rules/deep-output-contract.md", deep["mode_contract"]["output_rules"])
+            self.assertIn("--note-mode deep", deep["mode_contract"]["pdf_build"])
             self.assertTrue(deep["roles"]["pedagogy_editor"]["active"])
             self.assertEqual("blocked", deep["roles"]["pedagogy_editor"]["status"])
             next_payload = json.loads(self.run_cli("next", str(deep_state_file)).stdout)
             self.assertEqual("deep", next_payload["note_mode"])
+            self.assertEqual(deep["mode_contract"], next_payload["mode_contract"])
 
     def test_schema_v1_state_is_migrated_without_restarting_the_run(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -309,9 +313,9 @@ class ManageRunTests(unittest.TestCase):
             self.assertNotIn("codex_model", state["execution_profiles"]["economy_high"])
             table = state["runtime_model_table"]
             self.assertEqual({"agent": "study_note_worker", "model": "gpt-5.6-luna", "effort": "high"}, table["economy_high"])
-            self.assertEqual({"agent": "faithful_note_reviewer", "model": "gpt-5.6-sol", "effort": "high"}, table["review_high"])
-            self.assertEqual({"agent": "quality_note_worker", "model": "gpt-5.6-sol", "effort": "high"}, table["quality_high"])
-            self.assertEqual({"agent": "deep_note_reviewer", "model": "gpt-5.6-sol", "effort": "xhigh"}, table["quality_xhigh"])
+            self.assertEqual({"agent": "faithful_note_reviewer", "model": "gpt-6-astra", "effort": "high"}, table["review_high"])
+            self.assertEqual({"agent": "quality_note_worker", "model": "gpt-6-astra", "effort": "medium"}, table["quality_high"])
+            self.assertEqual({"agent": "deep_note_reviewer", "model": "gpt-6-astra", "effort": "high"}, table["quality_xhigh"])
             self.assertTrue(state["cost_policy"]["terra_enabled"] is False)
 
             self.assertEqual("python", state["roles"]["transcriber"]["execution"]["executor"])
@@ -519,8 +523,8 @@ class ManageRunTests(unittest.TestCase):
             payload = json.loads(dispatch.stdout)
             self.assertEqual("critical-review-1", payload["call_id"])
             self.assertEqual("codex", payload["execution"]["runtime"])
-            self.assertEqual("gpt-5.6-sol", payload["execution"]["model"])
-            self.assertEqual("high", payload["execution"]["reasoning_effort"])
+            self.assertEqual("gpt-6-astra", payload["execution"]["model"])
+            self.assertEqual("medium", payload["execution"]["reasoning_effort"])
             self.assertEqual(0, payload["remaining_critical_reviews"])
             self.run_cli(
                 "escalate",
@@ -714,7 +718,7 @@ class ManageRunTests(unittest.TestCase):
             self.assertEqual(1, len(premium))
             self.assertEqual("faithful_final_review_high", premium[0]["route"])
             self.assertEqual("review_high", premium[0]["profile"])
-            self.assertEqual("gpt-5.6-sol", premium[0]["model"])
+            self.assertEqual("gpt-6-astra", premium[0]["model"])
             self.assertEqual("high", premium[0]["reasoning_effort"])
             self.assertEqual("passed", premium[0]["status"])
 
@@ -826,8 +830,8 @@ class ManageRunTests(unittest.TestCase):
             calls = state["cost_usage"]["premium_final_reviews"]
             self.assertEqual(1, len(calls))
             self.assertEqual("deep_final_sol_xhigh", calls[0]["route"])
-            self.assertEqual("gpt-5.6-sol", calls[0]["model"])
-            self.assertEqual("xhigh", calls[0]["reasoning_effort"])
+            self.assertEqual("gpt-6-astra", calls[0]["model"])
+            self.assertEqual("high", calls[0]["reasoning_effort"])
             self.assertEqual("running", calls[0]["status"])
 
             self.run_cli(
@@ -1268,6 +1272,30 @@ class ManageRunTests(unittest.TestCase):
                 self.run_cli("init", str(inputs), "--lecture-id", "fmt-explicit", "--root", str(root), "--output-format", "pdf").stdout.strip()
             )
             self.assertEqual("pdf", json.loads(explicit.read_text(encoding="utf-8"))["output_format"])
+
+    def test_mode_change_updates_default_format_but_preserves_explicit_and_legacy_choices(self) -> None:
+        for initial_format in (None, "md", "pdf"):
+            with self.subTest(initial_format=initial_format), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                inputs = root / "input"
+                inputs.mkdir()
+                (inputs / "handout.pdf").write_bytes(b"test-pdf")
+                extra = [] if initial_format is None else ["--output-format", initial_format]
+                state_file = Path(self.run_cli(
+                    "init", str(inputs), "--lecture-id", "format-change", "--root", str(root), *extra,
+                ).stdout.strip())
+                for mode, default_format in (("deep", "pdf"), ("faithful", "md")):
+                    self.run_cli("set-mode", str(state_file), "--note-mode", mode, "--reason", "change learning purpose")
+                    state = json.loads(state_file.read_text(encoding="utf-8"))
+                    self.assertEqual(initial_format or default_format, state["output_format"])
+                    self.assertEqual(initial_format is not None, state["output_format_explicit"])
+                    self.assertIn(state["output_format"], state["roles"]["layout_builder"]["reason"])
+                # Older states do not tell us whether the user chose the format.
+                state.pop("output_format_explicit")
+                state_file.write_text(json.dumps(state), encoding="utf-8")
+                self.run_cli("set-mode", str(state_file), "--note-mode", "deep", "--reason", "legacy run")
+                legacy = json.loads(state_file.read_text(encoding="utf-8"))
+                self.assertEqual(state["output_format"], legacy["output_format"])
 
     def _run_until_writer(self, lecture_id: str, root: Path) -> tuple[Path, Path, Path]:
         inputs = root / "input"

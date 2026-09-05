@@ -1,5 +1,9 @@
 # Output and Layout
 
+## DEEP mode precedence
+
+For `deep`, read and apply `deep-output-contract.md` before the profiles below. Its default is a final PDF with textbook-quality math, original slides followed immediately by easy explanations, and a minimal cover. Do not automatically add contents, synthesis, quizzes, answer appendices, callout boxes, banners, captions, headers, or footers. The profiles and optional features below do not override that contract. Keep `faithful` Markdown defaults unchanged.
+
 Choose the lightest format that satisfies the user's purpose. A note meant for quick editing does not need a typeset PDF; a printable study handout should not stop at raw Markdown.
 
 ## Format Routing

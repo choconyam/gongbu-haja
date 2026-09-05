@@ -1,0 +1,30 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage[margin=20mm]{geometry}
+\usepackage{fontspec}
+\usepackage{xetexko}
+\usepackage{amsmath,amssymb,graphicx}
+\setmainfont{TeX Gyre Termes}
+%%KOREAN_FONT%%
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{7pt}
+\linespread{1.12}
+\raggedbottom
+% No captions, banners, boxes, or forced slide-sized pages.
+\newcommand{\sourceslide}[3][145mm]{%
+  \par\begingroup\centering
+  \includegraphics[page=#3,width=#1,keepaspectratio]{#2}\par\endgroup
+  \nopagebreak[4]\vspace{5pt}}
+\newcommand{\sourceimage}[2][145mm]{%
+  \par\begingroup\centering
+  \includegraphics[width=#1,keepaspectratio]{#2}\par\endgroup
+  \nopagebreak[4]\vspace{5pt}}
+\begin{document}
+\begin{titlepage}
+\vspace*{36mm}
+{\LARGE\bfseries %%TITLE%%\par}
+\vspace{8mm}
+%%SUMMARY%%
+\end{titlepage}
+%%BODY%%
+\end{document}

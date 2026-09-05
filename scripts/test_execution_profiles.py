@@ -53,9 +53,9 @@ class ProfileContractTests(unittest.TestCase):
         # Codex 값은 기존 정책의 회귀 기준이다.
         table = ep.RUNTIME_MODEL_TABLES["codex"]
         self.assertEqual({"model": "gpt-5.6-luna", "effort": "high"}, table["economy_high"])
-        self.assertEqual({"model": "gpt-5.6-sol", "effort": "high"}, table["review_high"])
-        self.assertEqual({"model": "gpt-5.6-sol", "effort": "high"}, table["quality_high"])
-        self.assertEqual({"model": "gpt-5.6-sol", "effort": "xhigh"}, table["quality_xhigh"])
+        self.assertEqual({"model": "gpt-6-astra", "effort": "high"}, table["review_high"])
+        self.assertEqual({"model": "gpt-6-astra", "effort": "medium"}, table["quality_high"])
+        self.assertEqual({"model": "gpt-6-astra", "effort": "high"}, table["quality_xhigh"])
 
     def test_snapshot_table_overrides_project_table(self) -> None:
         # 상태 파일에 남긴 스냅샷이 우선해야, 표가 나중에 바뀌어도 과거 실행을 같은 기준으로 검증한다.
@@ -63,6 +63,12 @@ class ProfileContractTests(unittest.TestCase):
         snapshot["economy_high"]["model"] = "sonnet-legacy"
         resolved = ep.resolve("economy_high", "claude", table=snapshot)
         self.assertEqual("sonnet-legacy", resolved["model"])
+        # 모델표 변경이 진행 중인 Codex 실행의 모델·effort를 소급 변경하지 않는다.
+        codex_snapshot = ep.runtime_table("codex")
+        for profile, effort in (("review_high", "high"), ("quality_high", "high"), ("quality_xhigh", "xhigh")):
+            codex_snapshot[profile].update(model="gpt-5.6-sol", effort=effort)
+            resolved = ep.resolve(profile, "codex", table=codex_snapshot)
+            self.assertEqual(("gpt-5.6-sol", effort), (resolved["model"], resolved["effort"]))
         with self.assertRaises(ep.ProfileError):
             ep.resolve("economy_high", "unknown-runtime")
         with self.assertRaises(ep.ProfileError):

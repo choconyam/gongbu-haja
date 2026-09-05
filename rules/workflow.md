@@ -1,5 +1,7 @@
 # Source-to-Note Workflow
 
+For `deep`, apply `deep-output-contract.md` throughout this workflow. Generic suggestions for recall prompts, final synthesis, or design features are not permission to add unsolicited exercises, summaries, or decoration. Preserve source exercises and instructor explanations within the selected scope.
+
 Use this workflow for building or substantially revising a study note. For a narrow audit, create only the inventories needed to support findings.
 
 ## 1. Scope and Authority
