@@ -1407,6 +1407,54 @@ class ManageRunTests(unittest.TestCase):
             )
             self.assertIn("시작할 수 없는 상태", misuse.stderr)
 
+    def test_deep_tex_patch_and_layout_rerun_reuse_review_without_bypassing_hashes(self) -> None:
+        # 실제 PDF 조판이 아니라 TeX 기준 원고의 패치·검수 재사용 상태 계약을 검사한다.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            result = self.run_cli("init", str(inputs), "--lecture-id", "deep-tex",
+                                  "--root", str(root), "--note-mode", "deep")
+            state_file = Path(result.stdout.strip())
+            source_map = self.write_source_map(state_file)
+            draft = state_file.parent / "note.tex"
+            draft.write_text("% units: handout-page-1\n" + r"\[1+1=2\]", encoding="utf-8")
+            pedagogy = state_file.parent / "pedagogy_review.txt"
+            pedagogy.write_text("추가 수정 없음", encoding="utf-8")
+            for role, artifact in (("source_mapper", source_map), ("writer", draft),
+                                   ("pedagogy_editor", pedagogy)):
+                self.run_cli("start", str(state_file), "--role", role)
+                self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
+
+            self.run_cli("start", str(state_file), "--role", "final_reviewer")
+            draft.write_text("% units: handout-page-1\n" + r"\[1 + 1 = 2\]", encoding="utf-8")
+            report = state_file.parent / "review.txt"
+            report.write_text("통과", encoding="utf-8")
+            coverage = self.write_coverage(state_file, "deep")
+            self.run_cli("complete", str(state_file), "--role", "final_reviewer",
+                         "--artifact", str(report), "--source-map", str(source_map),
+                         "--coverage-report", str(coverage), "--patched", str(draft))
+            self._complete_layout(state_file)
+            self.run_raw("verify", str(state_file), "--check-inputs")
+            before = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(hashlib.sha256(draft.read_bytes()).hexdigest(),
+                             before["roles"]["writer"]["artifacts"][0]["sha256"])
+
+            self.run_cli("rerun", str(state_file), "--role", "layout_builder",
+                         "--change-kind", "output_contract", "--reason", "템플릿 여백만 변경")
+            self._complete_layout(state_file)
+            self.run_raw("verify", str(state_file), "--check-inputs")
+            after = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(before["review_cycle"], after["review_cycle"])
+            self.assertEqual(before["cost_usage"], after["cost_usage"])
+            self.assertEqual(before["roles"]["final_reviewer"], after["roles"]["final_reviewer"])
+
+            # 조판 재실행이 바뀐 TeX 내용을 검수 없이 승인하는 우회로가 되면 안 된다.
+            draft.write_text(r"\[1+1=3\]", encoding="utf-8")
+            rejected = self.run_raw("verify", str(state_file), "--check-inputs", expected=1)
+            self.assertIn("기록 후 변경되었거나 누락된 산출물", rejected.stdout)
+
     def test_patched_accepts_layout_artifact_rebuilt_from_patched_draft(self) -> None:
         # 조판은 검수의 선행이 아니지만, 패치된 초안으로 다시 만든 조판 산출물도 --patched 로 재기록할 수 있어야 한다.
         with tempfile.TemporaryDirectory() as temporary:

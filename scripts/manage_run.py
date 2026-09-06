@@ -266,7 +266,7 @@ def role_execution_policy(
             "repair_profile": "local_python",
             "escalation_profile": None,
             "scope": (
-                "scripts/build_study_note_pdf.py --note-mode deep: 승인 원고와 TeX 동등성 대조·XeLaTeX 빌드·전체 쪽 및 수식·슬라이드 시각 검수"
+                "scripts/build_study_note_pdf.py --note-mode deep: 기준 TeX 직접 빌드·대표 쪽 시험 조판 재사용·최종 전체 쪽 및 수식·슬라이드 시각 검수"
                 if deep else "scripts/build_study_note_pdf.py 결정적 빌드·구조 검사·렌더 표본 확인"
             ),
         },
@@ -1896,7 +1896,15 @@ def command_rerun(args: argparse.Namespace) -> int:
         invalidate_downstream(state["roles"], args.role)
         reopen_role(entry, args.reason)
         refresh_statuses(state["roles"])
-        advance_review_cycle(state, f"선택 재실행: {args.role} ({args.change_kind})")
+        # DEEP 조판 계약만 바뀌면 같은 TeX의 내용 검수와 호출 원장을 보존한다.
+        # 본문·자료 변경은 verify의 기존 해시/지문 검사로 계속 거부된다.
+        layout_only_deep = (
+            state.get("note_mode") == "deep"
+            and args.role == "layout_builder"
+            and args.change_kind == "output_contract"
+        )
+        if not layout_only_deep:
+            advance_review_cycle(state, f"선택 재실행: {args.role} ({args.change_kind})")
         append_event(
             state,
             "rerun_requested",

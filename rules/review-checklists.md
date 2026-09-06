@@ -29,7 +29,8 @@ Use these as evidence-based gates, not as a demand that every note contain every
 - In `deep`, important prerequisite ideas, intermediate reasoning, derivation steps, assumptions, and application conditions are present where they are needed for understanding.
 - Supplemental material in `deep` is verified, tracked internally, and attributed briefly where needed without a separate source-note appendix or colored box.
 - In `deep`, `deep-output-contract.md` is satisfied: easy integrated explanations, retained in-scope original slides and source exercises, textbook math, minimal cover, and no unsolicited quizzes, answer/summary/production appendices or decorative headers/footers.
-- In `deep`, Markdown-to-TeX layout equivalence is checked and every PDF page is rendered; dense math and reduced slides are inspected at readable scale. Compilation alone is not visual QA.
+- In `deep`, one canonical TeX body is authored, reviewed, patched, and compiled; no separate review-only Markdown body is required. Scope/transcript preflight and a representative 1-2-page layout check are recorded or valid prior layout evidence is reused. Every final PDF page is visually checked, including dense math and reduced slides at readable scale.
+- Layout-only changes with unchanged source content reuse semantic review; content changes follow the existing patch/repair and coverage gates. Changed source hashes are never hidden to avoid review. Compilation alone is not visual QA.
 - In `deep`, an independent `quality_xhigh` review reads the completed note once after `quality_high` authoring and checks global logic, prerequisite links, derivation continuity, assumptions, and application conditions.
 - A mode change reused unchanged transcription and source mapping while rerunning writer and downstream roles only.
 

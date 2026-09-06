@@ -93,13 +93,13 @@ Python이 만든 후보를 확정 사실로 승격하지 않는다. 자동 치�
 
 새 `faithful`의 기본은 `preprocessing=deterministic`이며 `faithful-cost-path.md`를 먼저 적용한다. 이때 `transcript_auditor`와 `source_mapper`는 Python 전용이다. `../scripts/prepare_source_map.py`의 기계적 검사 보고서와 무손실 원문을 기록하고, 의미 판단은 작성 1개와 독립 검수 1개로 통합한다. 기존 상태에서 `preprocessing`이 없으면 과거 `semantic` 경로를 유지한다. 아래의 기존 hybrid 절차는 신규 `deep`과 명시적 `semantic`에 해당한다.
 
-`deep`의 출력 계약은 `deep-output-contract.md`를 따른다. 승인 원고의 TeX 조판 동등성을 확인한 뒤 `../scripts/build_study_note_pdf.py`에 `--note-mode deep`으로 전달한다. Python 컴파일 뒤 모든 쪽의 렌더와 수식·슬라이드 가독성을 확인하며, 일반 Markdown PDF 경로로 대체하지 않는다. 의미 검수의 프로필·횟수·병렬 구조와 `faithful` 기본 Markdown 경로는 바꾸지 않는다.
+`deep`의 출력 계약은 `deep-output-contract.md`를 따른다. 집필·검수의 기준 원고는 TeX 본문 하나이고, 이를 `../scripts/build_study_note_pdf.py`에 `--note-mode deep`으로 바로 전달한다. 집필 전 자료 확인과 재사용 가능한 대표 쪽 시험 조판을 수행하고, 기준 원고가 같은 배치 수정은 조판만 다시 만든다. Python 컴파일 뒤 최종 모든 쪽의 렌더와 수식·슬라이드 가독성을 확인하며 일반 Markdown PDF 경로로 대체하지 않는다. 의미 검수의 프로필·횟수·병렬 구조와 `faithful` 기본 Markdown 경로는 바꾸지 않는다.
 
 항상 실행하는 실제 역할은 다음으로 제한한다.
 
 1. `source_mapper`
 2. `writer`
-3. `layout_builder`와 `final_reviewer` — **병렬**. 조판은 내용을 바꾸지 않는 결정적 Python 작업이므로 최종 검수는 조판을 기다리지 않고 집필 초안(`<!-- units -->` 추적 주석 포함)을 바로 검수한다. 둘 다 `writer`(와 활성 선택 역할)만 기다린다.
+3. `layout_builder`와 `final_reviewer` — **병렬**. 조판은 내용을 바꾸지 않는 결정적 Python 작업이므로 최종 검수는 조판을 기다리지 않고 기준 원고(faithful: Markdown의 `<!-- units -->`, deep PDF: TeX의 `% units: ...`)를 바로 검수한다. 둘 다 `writer`(와 활성 선택 역할)만 기다린다.
 
 `faithful`의 최소 경로는 위 네 역할이다. `deep`에서는 `pedagogy_editor`를 기본 활성화해 배경지식과 중간 사고의 누락을 점검한다. `maintainer`는 최종 전달 파일을 정리할 때만 짧게 실행한다. 다음 역할은 조건부다.
 
@@ -249,7 +249,7 @@ python scripts/manage_run.py deactivate workspace/<강의ID>/run_state.json --ro
 
 ```powershell
 # (a) 검수 호출 안에서 국소 패치한 경우: 고친 파일의 새 해시를 함께 기록
-python scripts/manage_run.py complete workspace/<강의ID>/run_state.json --role final_reviewer --artifact <검수_결과> --source-map <source_map_JSON> --coverage-report <coverage_JSON> --patched work/note_draft.md
+python scripts/manage_run.py complete workspace/<강의ID>/run_state.json --role final_reviewer --artifact <검수_결과> --source-map <source_map_JSON> --coverage-report <coverage_JSON> --patched <기준_원고.md_또는.tex>
 
 # (b) 집필을 다시 열어야 하는 경우: 반려 기록 + 집필 이후 재개 + 새 review_cycle
 python scripts/manage_run.py repair workspace/<강의ID>/run_state.json --reopen writer --reason "2장 도입 발언 누락" --findings work/final_review.md
