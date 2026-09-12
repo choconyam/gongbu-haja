@@ -10,14 +10,14 @@
 
 ## 반드시 읽을 기준
 
-1. `../note_final_rules.md`
-2. `../rules/workflow.md`
-3. `../rules/transcription-workflow.md`(녹음 또는 전사 존재 시)
-4. 현재 사용자가 지정한 자료 전체
+- `deterministic`이면 `../rules/faithful-cost-path.md`의 실행 절과 `../scripts/prepare_source_map.py`의 명령 도움말만으로 준비한다. 아래 의미 매핑용 필독·절차는 실행하지 않는다.
+- `semantic`이면 `../note_final_rules.md`의 1·2절, 이번 입력 인벤토리와 무손실 근거 묶음을 읽는다.
+- 자료 유형·대응이 애매할 때만 `../rules/workflow.md`의 File Inventory·Source Map·Conflict and Uncertainty 중 해당 절을 확인한다.
+- 전사 정렬을 수행할 때만 `../rules/transcription-workflow.md`의 7·8절을 읽는다. 녹음 생성·전사 도구 설정은 이 역할의 필독이 아니다.
 
 ## 작업 절차
 
-`scope`가 있으면 `../rules/incremental-notes.md`를 먼저 적용한다. 이번 범위의 무손실 source map만 준비·매핑하며, `scope`, 원문 위치, 파일 목록과 안정 ID를 보존한다. 범위 밖 미진행 자료를 제외 판정으로 채우거나 이전 완료 범위를 다시 매핑하지 않는다. 아래의 모든 자료는 이번 범위만 뜻한다.
+`scope`가 있으면 `../rules/incremental-notes.md`의 ‘범위 확정’과 ‘실행과 모델 입력’ 중 매핑 기준을 적용한다. 이번 범위의 무손실 source map만 준비·매핑하며, `scope`, 원문 위치, 파일 목록과 안정 ID를 보존한다. 범위 밖 미진행 자료를 제외 판정으로 채우거나 이전 완료 범위를 다시 매핑하지 않는다. 아래의 모든 자료는 이번 범위만 뜻한다.
 
 1. `../scripts/manage_run.py`의 입력 인벤토리와 기존 Python 추출·색인을 확인한 뒤, 모든 대상 파일을 유형, 범위, 권위, 고유 내용, 판독 상태별로 정리한다. 녹음·원시 전사·검수 전사·메타데이터는 서로 다른 자료로 기록한다.
 2. 녹음 또는 전사가 있는데 검수 상태와 교안 정렬표가 없으면 이를 미해결로 남기고 전사 담당 또는 전사 검수 담당에게 돌려보낸다.

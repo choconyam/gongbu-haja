@@ -8,12 +8,10 @@
 
 ## 반드시 읽을 기준
 
-1. `../note_final_rules.md`
-2. 검증이 반영된 최신 초안
-3. `../rules/note-production-modes.md`
-4. `../rules/content-modes.md`
-5. `../rules/review-checklists.md`의 교육 품질 및 밀도 항목
-6. `deep`이면 `../rules/deep-output-contract.md`
+- `../note_final_rules.md`의 1·2·3절과 이번 초안·대응 근거를 읽는다.
+- `deep`이면 `../rules/deep-output-contract.md`의 내용과 범위·원본 교안과 설명 배치·교과서 수식 및 저장소 빌드 경로의 2항을 적용한다. 빌드 명령과 설치 조건은 읽지 않는다.
+- 과목별 설명법이 필요할 때만 `../rules/content-modes.md`의 해당 절을, 설명이 얇은지 판단하기 어려울 때만 `../rules/review-checklists.md`의 Teaching quality·Density Audit을 추가한다.
+- 관리자가 지정한 이번 범위와 필요한 선행개념만 읽는다. 이전 승인 본문 전체나 다른 과목·모드 규칙을 재독하지 않는다.
 
 ## 작업 원칙
 

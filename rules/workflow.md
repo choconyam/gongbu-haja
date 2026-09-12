@@ -4,6 +4,8 @@ For `deep`, apply `deep-output-contract.md` throughout this workflow. Generic su
 
 Use this workflow for building or substantially revising a study note. For a narrow audit, create only the inventories needed to support findings.
 
+This is a reference, not a startup reading list. Read the section needed for a source-mapping, conflict, structure, or handoff decision. Linked mode and transcript documents apply only to the operation being performed; do not recursively load them in full.
+
 ## 1. Scope and Authority
 
 Record the active request in one sentence: subject, source range, intended learner, study purpose, language, desired format, and deadline if stated.

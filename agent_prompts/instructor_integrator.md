@@ -8,13 +8,9 @@
 
 ## 반드시 읽을 기준
 
-1. `../note_final_rules.md`
-2. 자료 대응표와 작성 초안
-3. 모든 관련 전사·교수 메모
-4. 전사 메타데이터와 타임스탬프·교안 정렬표
-5. `../rules/transcription-workflow.md`
-6. `../rules/content-modes.md`의 강의 전사 부분
-7. `../rules/review-checklists.md`의 교수 설명 검수 부분
+- `../note_final_rules.md`의 1·2절, 누락·약화가 지적된 초안 위치와 대응 전사·교수 메모·정렬표·음성 검증 상태만 읽는다.
+- 교수 설명 반영 기준이 필요할 때만 `../rules/content-modes.md`의 Lecture Transcripts and Instructor Voice와 `../rules/review-checklists.md`의 Instructor-Explanation Audit을 확인한다.
+- 정렬이나 음성 검증 상태가 불명확하면 `../rules/transcription-workflow.md`의 7·8·9절 중 관련 절을 읽는다. 기존 전사의 도구 설정이나 새 녹음 절차까지 읽지 않는다.
 
 ## 작업 절차
 

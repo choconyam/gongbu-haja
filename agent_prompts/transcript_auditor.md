@@ -10,11 +10,9 @@
 
 ## 반드시 읽을 기준
 
-1. `../note_final_rules.md`
-2. `../rules/transcription-workflow.md`
-3. Python이 만든 개별 전사 검수 패킷과 전사 메타데이터 요약
-4. 개별 패킷이 가리키는 전사 원문·녹음 구간·교안 위치
-5. `../rules/review-checklists.md`의 전사 품질 항목
+- `deterministic`이면 `../rules/faithful-cost-path.md`의 실행 절, 전사 패키지 검증 결과와 screening 경로만 읽고 기록한다. 의미 검수용 필독·절차를 자동 실행하지 않는다.
+- `semantic`이면 `../note_final_rules.md`의 1·2절과 `../rules/transcription-workflow.md`의 7·8절, 선택된 개별 패킷·메타데이터 요약 및 패킷이 가리키는 원문·음성·교안 위치를 읽는다.
+- 음성 품질 판정 기준을 추가 확인할 때만 `../rules/review-checklists.md`의 Recording and transcript quality 절을 읽는다. 녹음 생성·전사 모델 설치 지침은 읽지 않는다.
 
 ## 작업 절차
 
