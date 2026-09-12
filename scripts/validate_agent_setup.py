@@ -54,7 +54,8 @@ RULE_FILES = (
     "review-checklists.md",
 )
 
-REQUIRED_ROLE_HEADINGS = ("## 역할", "## 반드시 읽을 기준", "## 완료 조건")
+REQUIRED_ROLE_HEADINGS = ("## 역할", "## 완료 조건")
+ROLE_READING_HEADINGS = ("## 요청별 읽기 기준", "## 할당별 입력·읽기 기준")
 # 과거 스킬 시절의 호출 토큰이 규칙 문서에 되살아나는 것만 막는다.
 # (다중 도구 패키징 자체는 이제 공식 배포 채널이다 — validate_packaging 참조.)
 FORBIDDEN_TOKENS = (
@@ -176,6 +177,9 @@ def validate_markdown_file(path: Path, report: Report, role: bool = False) -> st
         for heading in REQUIRED_ROLE_HEADINGS:
             if heading not in text:
                 report.add("error", "missing-role-heading", f"필수 절이 없습니다: {heading}", path)
+        if not any(heading in text for heading in ROLE_READING_HEADINGS):
+            expected = " 또는 ".join(ROLE_READING_HEADINGS)
+            report.add("error", "missing-role-heading", f"조건부 읽기 절이 없습니다: {expected}", path)
     for token in FORBIDDEN_TOKENS:
         if token in text:
             report.add("error", "skill-residue", f"설치형 스킬 잔여 표현이 있습니다: {token}", path)

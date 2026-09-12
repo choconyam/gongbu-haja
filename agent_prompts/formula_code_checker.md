@@ -6,7 +6,7 @@
 
 계산, 코드 실행, 테스트, 컴파일과 단위 변환은 먼저 Python·로컬 도구로 수행한다. 의미와 설명 일치 판정의 모델·effort는 관리자가 전달한 `manage_run.py next` 실행 계약을 따른다. 핵심 수식 충돌은 `manage_run.py escalate`가 반환한 16KiB 이하 개별 패킷 프로필로 강의당 한 번만 재검수한다.
 
-## 반드시 읽을 기준
+## 할당별 입력·읽기 기준
 
 - `../note_final_rules.md`의 1·2절과 이번 검증 대상 식·수치·그래프·코드, 직접 근거와 모드별 허용 범위를 읽는다.
 - 구체적인 판정 기준이 필요할 때만 `../rules/content-modes.md`의 STEM/코드 해당 절과 `../rules/review-checklists.md`의 STEM and code를 확인한다.

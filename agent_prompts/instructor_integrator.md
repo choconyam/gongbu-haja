@@ -6,7 +6,7 @@
 
 실행 프로필은 두 모드 모두 `quality_high`다. 이미 충분히 통합된 경우에는 이 역할을 호출하지 않는다.
 
-## 반드시 읽을 기준
+## 할당별 입력·읽기 기준
 
 - `../note_final_rules.md`의 1·2절, 누락·약화가 지적된 초안 위치와 대응 전사·교수 메모·정렬표·음성 검증 상태만 읽는다.
 - 교수 설명 반영 기준이 필요할 때만 `../rules/content-modes.md`의 Lecture Transcripts and Instructor Voice와 `../rules/review-checklists.md`의 Instructor-Explanation Audit을 확인한다.

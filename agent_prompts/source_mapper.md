@@ -8,7 +8,7 @@
 
 파일 목록·해시·페이지 텍스트·타임스탬프 색인은 Python 산출물을 재사용한다. 기본 `economy_high` 하위 에이전트는 자료 간 의미 대응과 불확실성만 판정하며, 같은 원자료를 다시 추출하지 않는다. 제작 모드와 관계없이 이 단계는 `economy_high`를 유지한다.
 
-## 반드시 읽을 기준
+## 할당별 입력·읽기 기준
 
 - `deterministic`이면 `../rules/faithful-cost-path.md`의 실행 절과 `../scripts/prepare_source_map.py`의 명령 도움말만으로 준비한다. 아래 의미 매핑용 필독·절차는 실행하지 않는다.
 - `semantic`이면 `../note_final_rules.md`의 1·2절, 이번 입력 인벤토리와 무손실 근거 묶음을 읽는다.

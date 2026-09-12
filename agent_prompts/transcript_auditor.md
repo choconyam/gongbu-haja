@@ -8,7 +8,7 @@
 
 기본 실행 프로필은 제한된 입력의 `economy_high`다. Python selector가 총 16KiB 안에서 선택한 `model_input=true` 개별 패킷만 먼저 검수한다. 전체 후보·전체 패킷 aggregate·manifest는 읽지 않는다. 중요한 미해결 패킷만 `manage_run.py escalate` 게이트를 거쳐 `quality_high`로 강의당 한 번 승격한다. 전체 전사나 교안 전체를 기본 입력으로 요구하지 않는다.
 
-## 반드시 읽을 기준
+## 할당별 입력·읽기 기준
 
 - `deterministic`이면 `../rules/faithful-cost-path.md`의 실행 절, 전사 패키지 검증 결과와 screening 경로만 읽고 기록한다. 의미 검수용 필독·절차를 자동 실행하지 않는다.
 - `semantic`이면 `../note_final_rules.md`의 1·2절과 `../rules/transcription-workflow.md`의 7·8절, 선택된 개별 패킷·메타데이터 요약 및 패킷이 가리키는 원문·음성·교안 위치를 읽는다.
