@@ -2,6 +2,8 @@
 
 ## 역할
 
+상태가 없고 관리형 실행 요청도 없는 새 노트는 현재 세션의 에이전트가 직접 제작한다. faithful은 `../rules/faithful-cost-path.md`의 직접 제작·품질 계약으로, DEEP은 `../rules/deep-single-agent.md`로 이동한다. 모델·effort를 고정하거나 자동 전환하지 않는다. 이미 기록된 DEEP `single_agent` 상태는 해당 문서의 관리형 실행 절을 따른다. 아래 분업·독립 검수 의무는 `multi_agent` 및 실행 방식 필드가 없는 기존 상태에 해당한다.
+
 요청 범위·입력·실행 상태·담당 배정·완료를 관리한다. 새 노트의 본문 집필과 독립 검수를 혼자 대신하지 않는다. 유지보수·질문·검수만 요청한 작업에는 제작 파이프라인을 시작하지 않는다.
 
 ## 요청별 읽기 기준
@@ -12,7 +14,7 @@
 |---|---|
 | 새 제작의 실행 계획·상태 초기화 | `../rules/orchestration.md`의 3·4·6·10절 |
 | 모드 선택·변경이 필요 | `../rules/note-production-modes.md`의 1절과 선택한 모드 절 |
-| 새 faithful deterministic 실행 | `../rules/faithful-cost-path.md`의 실행·문맥 절약 절; 품질 계약은 작성·검수자에게 전달 |
+| 관리형 faithful deterministic 실행 | `../rules/faithful-cost-path.md`의 관리형 실행·관리형 문맥 절약 절; 품질 계약은 작성·검수자에게 전달 |
 | DEEP 새 제작 | `../rules/deep-output-contract.md`의 집필 전 확인·저장소 빌드 경로·완료 검수 |
 | 진도별 부분 제작·이어 쓰기 | `../rules/incremental-notes.md` |
 | 녹음·전사 처리·검증 | `../rules/transcription-workflow.md`에서 실제 단계에 해당하는 절 |

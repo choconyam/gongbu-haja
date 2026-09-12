@@ -181,7 +181,7 @@ PREMIUM_FINAL_REVIEW_ROUTES = {
 }
 
 def role_execution_policy(
-    note_mode: str, preprocessing: str = "semantic"
+    note_mode: str, preprocessing: str = "semantic", execution_mode: str = "multi_agent"
 ) -> dict[str, dict[str, Any]]:
     """제작 모드별로 실제 모델 책임을 고정한다.
 
@@ -309,13 +309,25 @@ def role_execution_policy(
                 "escalation_profile": None,
                 "scope": scope,
             }
+    if execution_mode not in {"single_agent", "multi_agent"}:
+        raise RunError(f"알 수 없는 실행 방식입니다: {execution_mode}")
+    if execution_mode == "single_agent":
+        if note_mode != "deep":
+            raise RunError("faithful은 독립 검수가 필요하므로 single_agent 실행을 사용할 수 없습니다.")
+        for role, entry in policy.items():
+            if entry["executor"] != "python":
+                profile = "self_review" if role == "final_reviewer" else "current_agent"
+                entry.update(executor="main_agent", primary_profile=profile,
+                             agent_profile=None, repair_profile=profile, escalation_profile=None)
+                entry["scope"] = "현재 에이전트가 수행; 별도 모델 호출 없음. rules/deep-single-agent.md 적용"
     return policy
 
 
 def state_execution_policy(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
     # 이 필드가 없는 기존 실행은 과거 hybrid 계약을 보존한다.
     return role_execution_policy(
-        state.get("note_mode", DEFAULT_NOTE_MODE), state.get("preprocessing", "semantic")
+        state.get("note_mode", DEFAULT_NOTE_MODE), state.get("preprocessing", "semantic"),
+        state.get("execution_mode", "multi_agent"),
     )
 
 
@@ -562,6 +574,7 @@ def make_roles(
     output_format: str,
     note_mode: str = DEFAULT_NOTE_MODE,
     preprocessing: str = "semantic",
+    execution_mode: str = "multi_agent",
 ) -> dict[str, dict[str, Any]]:
     if note_mode not in NOTE_MODE_CONFIG:
         raise RunError(f"지원하지 않는 학습노트 제작 모드입니다: {note_mode}")
@@ -575,7 +588,7 @@ def make_roles(
     # 전사가 있다는 사실만으로 교수 고유 설명이 있다고 단정하지 않는다.
     # 전사 검수·자료 매핑에서 실제 고유 설명이 발견된 뒤 관리자가 활성화한다.
     integrator_active = False
-    formula_active = has_code
+    formula_active = has_code and execution_mode != "single_agent"
 
     roles: dict[str, dict[str, Any]] = {}
     roles["transcriber"] = role_entry(
@@ -610,7 +623,7 @@ def make_roles(
         "코드 파일이 발견됨" if formula_active else "초기 자동 판정에서 코드 파일 없음; 수식 발견 시 활성화",
         ["writer"],
     )
-    pedagogy_active = bool(NOTE_MODE_CONFIG[note_mode]["pedagogy_editor_default"])
+    pedagogy_active = bool(NOTE_MODE_CONFIG[note_mode]["pedagogy_editor_default"]) and execution_mode != "single_agent"
     roles["pedagogy_editor"] = role_entry(
         pedagogy_active,
         (
@@ -637,10 +650,14 @@ def make_roles(
         ["layout_builder", "final_reviewer"],
     )
 
-    execution_policy = role_execution_policy(note_mode, preprocessing)
+    execution_policy = role_execution_policy(note_mode, preprocessing, execution_mode)
     for name, entry in roles.items():
         entry["prompt"] = ROLE_PROMPTS[name]
         entry["execution"] = dict(execution_policy[name])
+        if execution_mode == "single_agent":
+            entry["prompt"] = "rules/deep-single-agent.md"
+    if execution_mode == "single_agent":
+        roles["final_reviewer"]["reason"] = "작성자의 자체 점검 1회; 독립 검수 아님"
     refresh_statuses(roles)
     return roles
 
@@ -949,6 +966,7 @@ def validate_state_shape(state: dict[str, Any]) -> None:
                 "python",
                 "subagent",
                 "hybrid",
+                "main_agent",
             }:
                 raise RunError(f"알 수 없는 역할 실행 방식입니다: {name}={execution}")
             if execution != expected_execution_policy[name]:
@@ -965,7 +983,9 @@ def validate_state_shape(state: dict[str, Any]) -> None:
         if max_attempts != expected_max_attempts:
             raise RunError(f"역할 시도 한도가 프로젝트 기준과 일치하지 않습니다: {name}={max_attempts}")
         active_profile = entry.get("active_profile")
-        if active_profile is not None and active_profile not in EXECUTION_PROFILES:
+        if active_profile is not None and active_profile not in EXECUTION_PROFILES and not (
+            active_profile in {"self_review", "current_agent"} and state.get("execution_mode") == "single_agent"
+        ):
             raise RunError(f"알 수 없는 실제 실행 프로필입니다: {name}={active_profile}")
     if state.get("execution_profiles") is not None and state["execution_profiles"] != EXECUTION_PROFILES:
         raise RunError("실행 프로필이 프로젝트 비용 정책과 일치하지 않습니다.")
@@ -1153,7 +1173,8 @@ def build_coverage_gate(
             "coverage report의 note_mode가 실행 상태와 일치하지 않습니다: "
             f"{coverage_payload.get('note_mode')} != {note_mode}"
         )
-    expected_profile = role_execution_policy(note_mode)["final_reviewer"]["agent_profile"]
+    expected_profile = ("self_review" if state.get("execution_mode") == "single_agent"
+                        else role_execution_policy(note_mode)["final_reviewer"]["agent_profile"])
     if coverage_payload.get("reviewer_profile") != expected_profile:
         raise RunError(
             "coverage report의 reviewer_profile이 최종 검수 실행 계약과 일치하지 않습니다: "
@@ -1233,6 +1254,7 @@ def rebuild_roles_after_input_change(
         state["output_format"],
         state.get("note_mode", DEFAULT_NOTE_MODE),
         state.get("preprocessing", "semantic"),
+        state.get("execution_mode", "multi_agent"),
     )
     apply_role_overrides(new_roles, state.get("role_overrides", {}))
 
@@ -1277,6 +1299,9 @@ def rebuild_roles_after_input_change(
         new["critical_review_call_id"] = old.get("critical_review_call_id")
         new["premium_call_id"] = old.get("premium_call_id")
         new["coverage_gate"] = old.get("coverage_gate")
+        for field in ("self_review_fingerprint", "self_review_patches"):
+            if field in old:
+                new[field] = old[field]
         new["rerun_count"] = old.get("rerun_count", 0)
         if old["active"] == new["active"] and old["dependencies"] == new["dependencies"]:
             for key in ("status", "started_at", "completed_at", "artifacts", "failure_reason"):
@@ -1295,9 +1320,17 @@ def rebuild_roles_after_mode_change(
     new_roles = make_roles(
         state["inputs"], state["output_format"], new_mode,
         state.get("preprocessing", "semantic"),
+        state.get("execution_mode", "multi_agent"),
     )
     apply_role_overrides(new_roles, state.get("role_overrides", {}))
     affected = role_descendants(old_roles, {"writer"}) | role_descendants(new_roles, {"writer"})
+    # A prior self-reviewed upstream result is not an independent role result.
+    changed_review_roles = {
+        role for role in ROLE_ORDER
+        if old_roles[role].get("active_profile") in {"current_agent", "self_review"}
+        and old_roles[role].get("execution") != new_roles[role].get("execution")
+    }
+    affected |= role_descendants(old_roles, changed_review_roles) | role_descendants(new_roles, changed_review_roles)
 
     for role in ROLE_ORDER:
         old = old_roles[role]
@@ -1321,6 +1354,9 @@ def rebuild_roles_after_mode_change(
         new["critical_review_call_id"] = old.get("critical_review_call_id")
         new["premium_call_id"] = old.get("premium_call_id")
         new["coverage_gate"] = old.get("coverage_gate")
+        for field in ("self_review_fingerprint", "self_review_patches"):
+            if field in old:
+                new[field] = old[field]
         new["rerun_count"] = old.get("rerun_count", 0)
         if old["active"] == new["active"] and old["dependencies"] == new["dependencies"]:
             for key in ("status", "started_at", "completed_at", "artifacts", "failure_reason"):
@@ -1488,8 +1524,13 @@ def locked_init(
     if state_file.exists():
         raise RunError(f"이미 실행 상태가 있습니다. 덮어쓰지 않았습니다: {state_file}")
     timestamp = now_iso()
+    # Direct DEEP production does not create role state. Keep single_agent
+    # support below only for already-recorded runs, not a second new-run path.
+    execution_mode = getattr(args, "execution_mode", None) or "multi_agent"
+    if execution_mode != "multi_agent":
+        raise RunError("새 DEEP 직접 제작은 init을 사용하지 않습니다. 관리형 실행은 multi_agent를 사용하세요.")
     preprocessing = getattr(args, "preprocessing", None) or (
-        "deterministic" if args.note_mode == "faithful" else "semantic"
+        "deterministic" if args.note_mode == "faithful" or execution_mode == "single_agent" else "semantic"
     )
     state = {
         "schema_version": SCHEMA_VERSION,
@@ -1504,7 +1545,8 @@ def locked_init(
         "output_format_explicit": args.output_format_explicit,
         "note_mode": args.note_mode,
         "preprocessing": preprocessing,
-        "mode_contract": NOTE_MODE_CONFIG[args.note_mode],
+        "execution_mode": execution_mode,
+        "mode_contract": dict(NOTE_MODE_CONFIG[args.note_mode]),
         "runtime": runtime,
         "runtime_model_table": runtime_table(runtime),
         "review_cycle": 1,
@@ -1526,7 +1568,7 @@ def locked_init(
         "execution_profiles": EXECUTION_PROFILES,
         "cost_policy": COST_POLICY,
         "cost_usage": new_cost_usage(),
-        "roles": make_roles(items, args.output_format, args.note_mode, preprocessing),
+        "roles": make_roles(items, args.output_format, args.note_mode, preprocessing, execution_mode),
         "events": [{"at": timestamp, "event": "initialized", "detail": f"입력 {len(items)}개"}],
     }
     if getattr(args, "scope_payload", None) is not None:
@@ -1603,7 +1645,10 @@ def command_next(args: argparse.Namespace) -> int:
         "prompt_root": str(ENGINE_ROOT / "agent_prompts"),
         "note_mode": note_mode,
         "preprocessing": state.get("preprocessing", "semantic"),
-        "mode_contract": NOTE_MODE_CONFIG[note_mode],
+        "execution_mode": state.get("execution_mode", "multi_agent"),
+        "mode_contract": {**NOTE_MODE_CONFIG[note_mode], **(
+            {"pedagogy_editor_default": False} if state.get("execution_mode") == "single_agent" else {}
+        )},
         "runtime": state.get("runtime"),
         "runtime_model_table": state.get("runtime_model_table"),
         "execution_profiles": state.get("execution_profiles", EXECUTION_PROFILES),
@@ -1748,6 +1793,8 @@ def reserve_premium_final_review(state: dict[str, Any], entry: dict[str, Any]) -
 def finish_premium_final_review(
     state: dict[str, Any], entry: dict[str, Any], status: str
 ) -> None:
+    if state.get("execution_mode") == "single_agent":
+        return
     call_id = entry.get("premium_call_id")
     if not call_id:
         raise RunError("최종 검수의 고비용 호출 예약 기록이 없습니다.")
@@ -2081,6 +2128,11 @@ def command_set_mode(args: argparse.Namespace) -> int:
         # Preserve explicit choices and older states whose choice origin is unknown.
         if state.get("output_format_explicit") is False:
             state["output_format"] = DEFAULT_OUTPUT_FORMATS[args.note_mode]
+        if args.note_mode == "faithful" and state.get("execution_mode") == "single_agent":
+            state["execution_mode"] = "multi_agent"
+            state["context_policy"]["manager_reads"] = "인벤토리, 실행 상태, 각 역할의 결과 요약"
+            append_event(state, "execution_mode_changed", "final_reviewer",
+                         "faithful 전환: 자체 점검 대신 독립 검수 적용")
         state["roles"] = rebuild_roles_after_mode_change(state, args.note_mode)
         state["note_mode"] = args.note_mode
         state["mode_contract"] = NOTE_MODE_CONFIG[args.note_mode]
@@ -2258,7 +2310,7 @@ def locked_start(args: argparse.Namespace, state_file: Path) -> int:
         active_profile = execution.get("repair_profile") or active_profile
     elif args.repair_scope or args.repair_packet:
         raise RunError("첫 실행에는 --repair-scope나 --repair-packet을 사용하지 않습니다.")
-    if args.role == "final_reviewer":
+    if args.role == "final_reviewer" and state.get("execution_mode") != "single_agent":
         active_profile = reserve_premium_final_review(state, entry)
     invalidate_downstream(state["roles"], args.role)
     entry["status"] = "running"
@@ -2314,6 +2366,8 @@ def locked_complete(args: argparse.Namespace, state_file: Path) -> int:
         if coverage_path not in artifacts:
             artifacts.append(coverage_path)
         finish_premium_final_review(state, entry, "passed")
+        if state.get("execution_mode") == "single_agent":
+            entry["self_review_fingerprint"] = final_review_input_fingerprint(state)
     finish_critical_review(state, entry, "passed")
     entry["status"] = "passed"
     entry["completed_at"] = now_iso()
@@ -2327,7 +2381,10 @@ def locked_complete(args: argparse.Namespace, state_file: Path) -> int:
 
 
 def note_premium_patch(state: dict[str, Any], entry: dict[str, Any], patched: list[dict[str, Any]]) -> None:
-    """검수 호출 안의 국소 수정을 고비용 호출 원장에 남기고 입력 지문을 수정 후 값으로 갱신한다."""
+    """국소 수정을 해당 검수 원장에 남기고 독립 검수의 입력 지문을 갱신한다."""
+    if state.get("execution_mode") == "single_agent":
+        entry.setdefault("self_review_patches", []).extend(patched)
+        return
     call_id = entry.get("premium_call_id")
     for call in state.get("cost_usage", {}).get("premium_final_reviews", []):
         if isinstance(call, dict) and call.get("call_id") == call_id:
@@ -2444,7 +2501,8 @@ def verify_coverage_gate(state: dict[str, Any]) -> list[str]:
 
     payload = read_json_object(coverage_path, "coverage report")
     note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
-    expected_profile = role_execution_policy(note_mode)["final_reviewer"]["agent_profile"]
+    expected_profile = ("self_review" if state.get("execution_mode") == "single_agent"
+                        else role_execution_policy(note_mode)["final_reviewer"]["agent_profile"])
     if gate.get("note_mode") != note_mode or payload.get("note_mode") != note_mode:
         errors.append("최종 검수 coverage report의 note_mode가 실행 상태와 다름")
     if (
@@ -2459,6 +2517,17 @@ def verify_coverage_gate(state: dict[str, Any]) -> list[str]:
 
 def verify_premium_final_reviews(state: dict[str, Any]) -> list[str]:
     errors: list[str] = []
+    if state.get("execution_mode") == "single_agent":
+        entry = state["roles"]["final_reviewer"]
+        if entry.get("premium_call_id"):
+            errors.append("자체 점검을 독립 모델 호출로 기록할 수 없음")
+        if entry.get("status") == "passed":
+            try:
+                if entry.get("self_review_fingerprint") != final_review_input_fingerprint(state):
+                    errors.append("자체 점검 이후 원자료 대응표 또는 본문이 변경됨")
+            except RunError as exc:
+                errors.append(str(exc))
+        return errors
     calls = state.get("cost_usage", {}).get("premium_final_reviews", [])
     call_by_id = {
         call.get("call_id"): call
@@ -2590,8 +2659,12 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser = subparsers.add_parser("init", help="입력 해시와 선택적 역할 실행 계획을 만듭니다.")
     init_parser.add_argument("input_dir", type=Path)
     init_parser.add_argument(
+        "--execution-mode", choices=("multi_agent",), default="multi_agent",
+        help="관리형 역할 실행용. 새 DEEP 직접 제작은 init 없이 deep-single-agent.md를 따른다. 기존 상태는 보존.",
+    )
+    init_parser.add_argument(
         "--preprocessing", choices=("deterministic", "semantic"), default=None,
-        help="생략 시 faithful은 로컬 전처리, deep은 의미 대응. 기존 실행은 저장된 방식을 유지한다.",
+        help="생략 시 faithful은 로컬 전처리, 관리형 deep은 의미 대응. 기존 실행은 보존.",
     )
     init_parser.add_argument("--lecture-id", required=True)
     init_parser.add_argument("--scope", type=Path, help="이번 수업 범위 JSON: label 및 sources의 pages/lines/segments 또는 all")

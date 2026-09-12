@@ -148,6 +148,11 @@ def _validate_coverage_payload(payload: dict[str, Any], report: Report) -> list[
         report.add("invalid-note-mode", f"note_mode는 faithful 또는 deep이어야 합니다: {note_mode!r}", "coverage.note_mode")
     reviewer_profile = payload.get("reviewer_profile")
     expected_profile = REVIEWER_PROFILES.get(note_mode) if isinstance(note_mode, str) else None
+    if payload.get("review_method") == "self":
+        if note_mode == "deep":
+            expected_profile = "self_review"
+        else:
+            report.add("invalid-review-method", "자체 점검은 deep에만 허용됩니다. faithful은 독립 검수가 필요합니다.", "coverage.review_method")
     if not isinstance(reviewer_profile, str) or not reviewer_profile.strip():
         report.add("invalid-reviewer-profile", "reviewer_profile은 비어 있지 않은 문자열이어야 합니다.", "coverage.reviewer_profile")
     elif expected_profile is not None and reviewer_profile != expected_profile:

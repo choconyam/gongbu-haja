@@ -31,6 +31,15 @@ A+B&=\begin{bmatrix}1&2\\3&4\end{bmatrix}
 \]
 예를 들어 왼쪽 아래 칸은 $3+(-1)=2$가 됩니다.
 분수 $\frac{1}{2}$와 제곱근 $\sqrt{2}$, 위첨자 $x^2$도 수식으로 표시합니다.
+\begin{keybox}[핵심]
+같은 위치의 성분끼리 더합니다. \textbf{행렬의 크기가 같아야 합니다.}
+\end{keybox}
+\begin{warnbox}
+행과 열의 위치를 서로 바꾸지 않습니다.
+\end{warnbox}
+\begin{goodbox}
+왼쪽 아래 성분을 먼저 검산하면 부호 실수를 찾기 쉽습니다.
+\end{goodbox}
 """
 
 
@@ -56,13 +65,15 @@ def render_fixture(directory: Path) -> Path:
 
 
 class DeepTests(unittest.TestCase):
-    def test_template_keeps_math_and_has_no_automatic_furniture(self):
+    def test_template_keeps_math_and_fixed_acoustic_style(self):
         doc = deep.render_document(BODY, "과목", "00", "행렬 & 벡터")
         self.assertIn(BODY, doc)
         self.assertIn(r"과목\_00", doc)
         self.assertIn(r"행렬 \& 벡터", doc)
-        self.assertIn(r"\pagestyle{empty}", doc)
-        for forbidden in (r"\tableofcontents", r"\fancyhead", r"\fancyfoot", r"\fcolorbox", "STUDY NOTE"):
+        self.assertIn(r"\linespread{1.22}", doc)
+        self.assertIn(r"\newtcolorbox{keybox}", doc)
+        self.assertIn(r"\fancyfoot[C]", doc)
+        for forbidden in (r"\tableofcontents", r"\fancyhead", r"\fcolorbox", "STUDY NOTE"):
             self.assertNotIn(forbidden, doc)
         self.assertIn("%%TITLE%%", deep.render_document("%%TITLE%%", "과목", "00", None))
 

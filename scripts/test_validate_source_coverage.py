@@ -55,6 +55,30 @@ class ValidateSourceCoverageTests(unittest.TestCase):
                 self.assertEqual(4, report.summary["coverage_item_count"])
                 self.assertEqual({"excluded": 1, "included": 1, "merged": 1, "unresolved": 1}, report.summary["decision_counts"])
 
+    def test_self_review_requires_explicit_method_and_preserves_coverage_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, coverage = self.valid_payloads("deep")
+            coverage["reviewer_profile"] = "self_review"
+            source_path = self.write_json(root, "source.json", source)
+            self.assertTrue(vsc.validate(source_path, self.write_json(root, "coverage.json", coverage)).errors)
+            coverage["review_method"] = "self"
+            self.assertFalse(vsc.validate(source_path, self.write_json(root, "coverage.json", coverage)).errors)
+            coverage["items"].pop()
+            self.assertTrue(vsc.validate(source_path, self.write_json(root, "coverage.json", coverage)).errors)
+
+    def test_faithful_rejects_self_review_even_with_independent_profile_label(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, coverage = self.valid_payloads("faithful")
+            source_path = self.write_json(root, "source.json", source)
+            coverage["review_method"] = "self"
+            for profile in ("self_review", "review_high"):
+                with self.subTest(profile=profile):
+                    coverage["reviewer_profile"] = profile
+                    report = vsc.validate(source_path, self.write_json(root, "coverage.json", coverage))
+                    self.assertTrue(report.errors)
+
     def test_public_validate_coverage_returns_ids_and_flat_integer_counts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

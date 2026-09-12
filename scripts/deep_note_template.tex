@@ -1,16 +1,35 @@
 \documentclass[a4paper,11pt]{article}
-\usepackage[margin=20mm]{geometry}
+\usepackage[margin=20mm,footskip=14mm]{geometry}
 \usepackage{fontspec}
 \usepackage{xetexko}
 \usepackage{amsmath,amssymb,graphicx}
+\usepackage{xcolor,titlesec,fancyhdr,booktabs,tabularx}
+\usepackage[breakable,skins]{tcolorbox}
 \setmainfont{TeX Gyre Termes}
+\setsansfont{TeX Gyre Heros}
 %%KOREAN_FONT%%
-\pagestyle{empty}
-\setlength{\parindent}{0pt}
-\setlength{\parskip}{7pt}
-\linespread{1.12}
+\definecolor{Accent}{HTML}{1F4E79}
+\definecolor{AccentLight}{HTML}{EAF2F8}
+\definecolor{Warn}{HTML}{A64B00}
+\definecolor{WarnLight}{HTML}{FFF4E5}
+\definecolor{Good}{HTML}{0B6E4F}
+\definecolor{GoodLight}{HTML}{E9F7F1}
+\pagestyle{fancy}\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[C]{\sffamily\fontsize{9}{11}\selectfont\thepage}
+\setlength{\parindent}{1.2em}
+\setlength{\parskip}{0.35em}
+\linespread{1.22}
+\titleformat{\section}{\sffamily\bfseries\fontsize{16}{20}\selectfont\color{Accent}}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\sffamily\bfseries\fontsize{12}{15}\selectfont}{\thesubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{12pt}{6pt}
+\titlespacing*{\subsection}{0pt}{9pt}{4pt}
+\tcbset{notebox/.style={breakable,boxrule=0.7pt,arc=2mm,left=2mm,right=2mm,top=1mm,bottom=1mm,fonttitle=\bfseries,before skip=6pt,after skip=6pt}}
+\newtcolorbox{keybox}[1][핵심]{notebox,colback=AccentLight,colframe=Accent,title=#1}
+\newtcolorbox{warnbox}[1][주의]{notebox,colback=WarnLight,colframe=Warn,title=#1}
+\newtcolorbox{goodbox}[1][기억할 점]{notebox,colback=GoodLight,colframe=Good,title=#1}
 \raggedbottom
-% No captions, banners, boxes, or forced slide-sized pages.
+% Fixed restrained acoustic-style design; no automatic appendix or forced slide pages.
 \newcommand{\sourceslide}[3][145mm]{%
   \par\begingroup\centering
   \includegraphics[page=#3,width=#1,keepaspectratio]{#2}\par\endgroup
@@ -22,9 +41,12 @@
 \begin{document}
 \begin{titlepage}
 \vspace*{36mm}
-{\LARGE\bfseries %%TITLE%%\par}
+{\sffamily\fontsize{24}{28}\selectfont\bfseries\color{Accent} %%TITLE%%\par}
+\vspace{4mm}
+{\color{Accent}\noindent\rule{0.82\linewidth}{0.8pt}\par}
 \vspace{8mm}
 %%SUMMARY%%
 \end{titlepage}
+\setcounter{page}{1}
 %%BODY%%
 \end{document}

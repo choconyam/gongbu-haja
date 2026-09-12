@@ -34,9 +34,9 @@ def render_document(body: str, course: str, session: str, summary: str | None,
             raise ValueError("한글 글꼴은 설치된 글꼴 이름으로 지정하십시오.")
         font_setup = rf"\setmainhangulfont{{{korean_font}}}"
     else:
-        font_setup = r"""\IfFontExistsTF{Malgun Gothic}{\setmainhangulfont{Malgun Gothic}}{
+        font_setup = r"""\IfFontExistsTF{Noto Serif CJK KR}{\setmainhangulfont{Noto Serif CJK KR}}{
+\IfFontExistsTF{Malgun Gothic}{\setmainhangulfont{Malgun Gothic}}{
 \IfFontExistsTF{Apple SD Gothic Neo}{\setmainhangulfont{Apple SD Gothic Neo}}{
-\IfFontExistsTF{Noto Serif CJK KR}{\setmainhangulfont{Noto Serif CJK KR}}{
 \PackageError{deep-note}{No Korean font found; use --tex-korean-font}{Install a Korean font first.}}}}"""
     values = {
         "KOREAN_FONT": font_setup,

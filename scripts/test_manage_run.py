@@ -12,6 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts import manage_run as mr
+
 
 # 실제 사용자 폴더를 건드리지 않도록 모든 시나리오는 임시 폴더에서 실행한다.
 SCRIPT = Path(__file__).with_name("manage_run.py")
@@ -30,6 +32,8 @@ class ManageRunTests(unittest.TestCase):
     def run_cli(self, *arguments: str, expected: int = 0) -> subprocess.CompletedProcess[str]:
         command = list(arguments)
         if command and command[0] == "init":
+            if "--execution-mode" not in command:
+                command += ["--execution-mode", "multi_agent"]
             # 기존 상태 전이 시나리오는 과거 semantic 계약을 명시한다.
             # 신규 기본값과 호환성은 아래 별도 테스트가 raw init으로 확인한다.
             if "--preprocessing" not in command:
@@ -113,6 +117,130 @@ class ManageRunTests(unittest.TestCase):
             encoding="utf-8",
         )
         return path
+
+    def legacy_single_state(self, inputs: Path, root: Path, preprocessing: str = "deterministic") -> Path:
+        """Reconstruct the previous single-agent state schema, never a user run."""
+        result = self.run_raw("init", str(inputs), "--lecture-id", "single",
+                              "--root", str(root), "--runtime", "codex", "--note-mode", "deep",
+                              "--preprocessing", preprocessing)
+        path = Path(result.stdout.strip())
+        state = json.loads(path.read_text(encoding="utf-8"))
+        state["execution_mode"] = "single_agent"
+        state["roles"] = mr.make_roles(state["inputs"], state["output_format"], "deep", preprocessing, "single_agent")
+        state["mode_contract"]["pedagogy_editor_default"] = False
+        path.write_text(json.dumps(state), encoding="utf-8")
+        return path
+
+    def test_new_managed_runs_require_independent_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "lecture.txt").write_text("정의", encoding="utf-8")
+            for mode in ("deep", "faithful"):
+                with self.subTest(mode=mode):
+                    args = ("init", str(inputs), "--lecture-id", mode, "--root", str(root),
+                            "--runtime", "codex", "--note-mode", mode)
+                    self.run_raw(*args, "--execution-mode", "single_agent", expected=2)
+                    self.assertFalse((root / "workspace" / mode / "run_state.json").exists())
+                    result = self.run_raw(*args)
+                    state = json.loads(Path(result.stdout.strip()).read_text(encoding="utf-8"))
+                    self.assertEqual("multi_agent", state["execution_mode"])
+                    self.assertEqual("subagent", state["roles"]["final_reviewer"]["execution"]["executor"])
+
+    def test_legacy_single_switch_to_faithful_restores_independent_review(self) -> None:
+        for preprocessing in ("deterministic", "semantic"):
+            with self.subTest(preprocessing=preprocessing), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                inputs = root / "input"
+                inputs.mkdir()
+                (inputs / "handout.pdf").write_bytes(b"test-pdf")
+                state_file = self.legacy_single_state(inputs, root, preprocessing)
+                source_map = self.write_source_map(state_file)
+                self.run_cli("start", str(state_file), "--role", "source_mapper")
+                self.run_cli("complete", str(state_file), "--role", "source_mapper", "--artifact", str(source_map))
+                old = json.loads(state_file.read_text(encoding="utf-8"))
+                self.run_cli("set-mode", str(state_file), "--note-mode", "faithful", "--reason", "사용자 요청")
+                state = json.loads(state_file.read_text(encoding="utf-8"))
+                self.assertEqual("multi_agent", state["execution_mode"])
+                self.assertEqual("review_high", state["roles"]["final_reviewer"]["execution"]["agent_profile"])
+                self.assertEqual("subagent", state["roles"]["final_reviewer"]["execution"]["executor"])
+                self.assertEqual("blocked", state["roles"]["final_reviewer"]["status"])
+                self.assertEqual(old["inputs"], state["inputs"])
+                if preprocessing == "deterministic":
+                    self.assertEqual(old["roles"]["source_mapper"]["artifacts"], state["roles"]["source_mapper"]["artifacts"])
+                    self.assertEqual("passed", state["roles"]["source_mapper"]["status"])
+                else:
+                    self.assertEqual("ready", state["roles"]["source_mapper"]["status"])
+                    self.assertIsNone(state["roles"]["source_mapper"]["active_profile"])
+                self.run_cli("next", str(state_file), "--brief")
+                # Invalid faithful self-review states fail closed, without rewriting them.
+                state["execution_mode"] = "single_agent"
+                state_file.write_text(json.dumps(state), encoding="utf-8")
+                before = state_file.read_bytes()
+                self.run_cli("next", str(state_file), expected=2)
+                self.assertEqual(before, state_file.read_bytes())
+
+    def test_legacy_deep_single_agent_full_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = root / "input"
+            inputs.mkdir()
+            (inputs / "handout.pdf").write_bytes(b"test-pdf")
+            state_file = self.legacy_single_state(inputs, root)
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual("single_agent", state["execution_mode"])
+            self.assertEqual("deterministic", state["preprocessing"])
+            self.assertFalse(state["roles"]["pedagogy_editor"]["active"])
+            self.assertFalse(state["roles"]["formula_code_checker"]["active"])
+            self.assertEqual("main_agent", state["roles"]["writer"]["execution"]["executor"])
+            self.assertEqual("main_agent", state["roles"]["final_reviewer"]["execution"]["executor"])
+            self.assertFalse(any(r["execution"]["executor"] == "subagent" for r in state["roles"].values()))
+            source_map = self.write_source_map(state_file)
+            body = state_file.parent / "body.tex"
+            body.write_text("본문", encoding="utf-8")
+            pdf = state_file.parent / "final.pdf"
+            pdf.write_bytes(b"test-pdf-output")
+            for role, artifact in (("source_mapper", source_map), ("writer", body)):
+                self.run_cli("start", str(state_file), "--role", role)
+                self.run_cli("complete", str(state_file), "--role", role, "--artifact", str(artifact))
+            next_payload = json.loads(self.run_cli("next", str(state_file), "--brief").stdout)
+            self.assertTrue(all(r["resolved_profile"] is None for r in next_payload["ready"]))
+            self.run_cli("start", str(state_file), "--role", "final_reviewer")
+            coverage = self.write_coverage(state_file, "deep")
+            payload = json.loads(coverage.read_text(encoding="utf-8"))
+            # An independent-review label cannot masquerade as self review.
+            self.run_cli("complete", str(state_file), "--role", "final_reviewer", "--artifact", str(coverage),
+                         "--source-map", str(source_map), "--coverage-report", str(coverage), expected=2)
+            payload.update(reviewer_profile="self_review", review_method="self")
+            coverage.write_text(json.dumps(payload), encoding="utf-8")
+            body.write_text("본문의 오류만 국소 수정", encoding="utf-8")
+            self.run_cli("complete", str(state_file), "--role", "final_reviewer", "--artifact", str(coverage),
+                         "--source-map", str(source_map), "--coverage-report", str(coverage), "--patched", str(body))
+            self.run_cli("start", str(state_file), "--role", "layout_builder")
+            self.run_cli("complete", str(state_file), "--role", "layout_builder", "--artifact", str(pdf))
+            self.run_cli("verify", str(state_file), "--check-inputs")
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual([], state["cost_usage"]["premium_final_reviews"])
+            self.assertEqual("self_review", state["roles"]["final_reviewer"]["active_profile"])
+            # Layout-only reruns do not reopen content self-review.
+            self.run_cli("rerun", str(state_file), "--role", "layout_builder", "--change-kind", "output_contract", "--reason", "배치만 변경")
+            self.run_cli("start", str(state_file), "--role", "layout_builder")
+            self.run_cli("complete", str(state_file), "--role", "layout_builder", "--artifact", str(pdf))
+            self.run_cli("verify", str(state_file), "--check-inputs")
+            body.write_text("기록 후 변경", encoding="utf-8")
+            self.run_cli("verify", str(state_file), expected=1)
+            self.run_cli("set-mode", str(state_file), "--note-mode", "faithful", "--reason", "사용자 목적 변경")
+            switched = json.loads(state_file.read_text(encoding="utf-8"))
+            reviewer = switched["roles"]["final_reviewer"]
+            self.assertEqual("multi_agent", switched["execution_mode"])
+            self.assertEqual("blocked", reviewer["status"])
+            self.assertIsNone(reviewer["active_profile"])
+            self.assertIsNone(reviewer["coverage_gate"])
+            self.assertNotIn("self_review_fingerprint", reviewer)
+            self.assertNotIn("self_review_patches", reviewer)
+            self.assertEqual(state["cost_usage"], switched["cost_usage"])
+            self.run_cli("next", str(state_file), "--brief")
 
     def write_coverage(self, state_file: Path, mode: str) -> Path:
         path = state_file.parent / f"coverage-{mode}.json"
