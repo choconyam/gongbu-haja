@@ -91,6 +91,8 @@ Python이 만든 후보를 확정 사실로 승격하지 않는다. 자동 치�
 
 ## 3. 최소 실행 경로
 
+부분 제작·이어 쓰기는 `incremental-notes.md`를 먼저 따른다. `scope`가 있으면 이 문서의 전체 원자료·완성본은 이번 범위 전체와 필요한 앞부분 연결로 제한한다. 완료된 이전 실행에 새 진도를 `refresh-inputs`하지 않고 새 scoped 실행을 연결한다. 역할 모델·새 범위의 coverage·독립 검수 게이트는 그대로 유지한다.
+
 새 `faithful`의 기본은 `preprocessing=deterministic`이며 `faithful-cost-path.md`를 먼저 적용한다. 이때 `transcript_auditor`와 `source_mapper`는 Python 전용이다. `../scripts/prepare_source_map.py`의 기계적 검사 보고서와 무손실 원문을 기록하고, 의미 판단은 작성 1개와 독립 검수 1개로 통합한다. 기존 상태에서 `preprocessing`이 없으면 과거 `semantic` 경로를 유지한다. 아래의 기존 hybrid 절차는 신규 `deep`과 명시적 `semantic`에 해당한다.
 
 `deep`의 출력 계약은 `deep-output-contract.md`를 따른다. 집필·검수의 기준 원고는 TeX 본문 하나이고, 이를 `../scripts/build_study_note_pdf.py`에 `--note-mode deep`으로 바로 전달한다. 집필 전 자료 확인과 재사용 가능한 대표 쪽 시험 조판을 수행하고, 기준 원고가 같은 배치 수정은 조판만 다시 만든다. Python 컴파일 뒤 최종 모든 쪽의 렌더와 수식·슬라이드 가독성을 확인하며 일반 Markdown PDF 경로로 대체하지 않는다. 의미 검수의 프로필·횟수·병렬 구조와 `faithful` 기본 Markdown 경로는 바꾸지 않는다.

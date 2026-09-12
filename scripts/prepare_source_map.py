@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""자료 충실형용 무손실 근거 묶음과 기계적 전사 검사 보고서를 만든다.
+"""자료 충실형 또는 명시적 진도 범위의 무손실 근거 묶음을 만든다.
 
-원문을 요약하거나 교정하지 않는다. 모든 입력을 포함하며 의미·음성 검증은
+원문을 요약하거나 교정하지 않는다. 대상 범위의 모든 입력을 포함하며 의미·음성 검증은
 작성자와 독립 검수자의 책임으로 남긴다. 동일 출력은 재사용하고 변경본은 거부한다.
 """
 
@@ -14,11 +14,13 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from .note_scope import select_rows, validate_map_scope
     from .manage_run import RunError, changed_inputs, read_state, sha256_file
     from .prepare_transcript_review import (
         ASSESSMENT_RE, NUMBER_RE, PLACEHOLDER_RE, PreparationError, extract_pdf_pages,
     )
 except ImportError:
+    from note_scope import select_rows, validate_map_scope
     from manage_run import RunError, changed_inputs, read_state, sha256_file
     from prepare_transcript_review import (
         ASSESSMENT_RE, NUMBER_RE, PLACEHOLDER_RE, PreparationError, extract_pdf_pages,
@@ -91,15 +93,18 @@ def segment_rows(path: Path, expected_audio: str | None = None) -> list[dict[str
     return rows
 
 
-def source_rows(path: Path, transcript: bool, expected_audio: str | None = None) -> list[dict[str, Any]]:
+def source_rows(path: Path, transcript: bool, expected_audio: str | None = None,
+                selector: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     if transcript and path.suffix.lower() == ".json":
         return segment_rows(path, expected_audio)
     if path.suffix.lower() == ".pdf":
         pages = extract_pdf_pages(path)
-        if any(not page.strip() for page in pages):
-            raise PreparationError(f"빈 PDF 페이지가 있습니다. 원본 확인·OCR이 필요합니다: {path}")
-        return [{"location": {"page": index}, "text": page, "flags": ["visual_review_required"]}
+        rows = [{"location": {"page": index}, "text": page, "flags": ["visual_review_required"]}
                 for index, page in enumerate(pages, 1)]
+        rows = select_rows(rows, selector) if selector else rows
+        if any(not row["text"].strip() for row in rows):
+            raise PreparationError(f"빈 PDF 페이지가 있습니다. 원본 확인·OCR이 필요합니다: {path}")
+        return rows
     if path.suffix.lower() not in TEXT_SUFFIXES:
         raise PreparationError(f"텍스트 추출본을 --extracted 원본=파일로 지정하십시오: {path}")
     # 빈 줄·숫자·시간표시를 포함해 그대로 보존한다. 학생 본문에서만 추적 정보를 숨긴다.
@@ -125,7 +130,7 @@ def prepare(
     state_path: Path, transcripts: list[str], extracted: list[str],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     state = read_state(state_path)
-    if state.get("preprocessing") != "deterministic":
+    if state.get("preprocessing") != "deterministic" and state.get("scope") is None:
         raise PreparationError("이 실행은 deterministic 전처리 계약이 아닙니다. 기존 상태를 직접 변경하지 마십시오.")
     changes = changed_inputs(state)
     if changes:
@@ -146,7 +151,10 @@ def prepare(
         if relative in audio_map and not is_transcript:
             raise PreparationError(f"전사 매핑의 원본은 녹음 또는 전사여야 합니다: {relative}")
         derivative = audio_map.get(relative, text_map.get(relative, original))
-        rows = source_rows(derivative, is_transcript, original.name if item["kind"] == "audio" else None)
+        selector = state.get("scope", {}).get("sources", {}).get(relative)
+        rows = source_rows(derivative, is_transcript, original.name if item["kind"] == "audio" else None, selector)
+        if selector:
+            rows = select_rows(rows, selector)
         if relative in text_map:
             for row in rows:
                 row["flags"].append("extraction_alignment_required")
@@ -163,7 +171,11 @@ def prepare(
         for index, chunk in enumerate(chunk_rows(rows), 1):
             # 발언마다 JSON 메타데이터를 반복하지 않는다. 원문은 한 번, 위치는 구간 양 끝만 저장한다.
             separator = "\n" if derivative.suffix.lower() == ".json" else ""
-            units.append({"source_unit_id": f"{source_id}_u{index:04d}", "source_id": source_id,
+            unit_id = f"{source_id}_u{index:04d}"
+            if selector:
+                location_key = next(key for key in ("page", "segment_index", "line") if key in chunk[0]["location"])
+                unit_id = f"{source_id}_{location_key}_{chunk[0]['location'][location_key]}_{chunk[-1]['location'][location_key]}"
+            units.append({"source_unit_id": unit_id, "source_id": source_id,
                           "source_start": chunk[0]["location"], "source_end": chunk[-1]["location"],
                           "row_count": len(chunk),
                           "evidence": separator.join(row["text"] for row in chunk),
@@ -172,6 +184,9 @@ def prepare(
     source_map = {"kind": "study_note_source_map", "schema_version": 1,
                   "preparation": "lossless_deterministic", "lecture_id": state["lecture_id"],
                   "source_files": sources, "source_units": units}
+    if state.get("scope") is not None:
+        source_map["scope"] = state["scope"]
+        validate_map_scope(source_map, state["scope"])
     screening = {"kind": "study_note_source_screening", "schema_version": 1,
                  "lecture_id": state["lecture_id"], "semantic_reviewed": False,
                  "reviewed_against_audio": False,

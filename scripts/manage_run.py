@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from .note_scope import check_extension, scoped_inventory, tex_part_input, validate_map_scope, validate_scope
     from .execution_profiles import (
         EXECUTION_PROFILES,
         RUNTIMES,
@@ -32,6 +34,7 @@ try:
     from .project_types import AUDIO_SUFFIXES
     from .validate_source_coverage import CoverageValidationError, validate_coverage
 except ImportError:  # `python scripts/manage_run.py`로 직접 실행할 때
+    from note_scope import check_extension, scoped_inventory, tex_part_input, validate_map_scope, validate_scope
     from execution_profiles import (
         EXECUTION_PROFILES,
         RUNTIMES,
@@ -915,6 +918,10 @@ def migrate_state(state: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_state_shape(state: dict[str, Any]) -> None:
+    if state.get("scope") is not None:
+        validate_scope(state["scope"])
+        if scope_fingerprint(state["scope"]) != state.get("scope_sha256"):
+            raise RunError("기록된 진도 범위가 변경됐습니다. 이어 쓸 범위는 새 실행으로 등록하십시오.")
     if state.get("schema_version") != SCHEMA_VERSION:
         raise RunError(f"지원하지 않는 실행 상태 버전입니다: {state.get('schema_version')}")
     runtime = state.get("runtime")
@@ -1137,6 +1144,8 @@ def build_coverage_gate(
             details += f"; 외 {len(exc.report.errors) - 5}개"
         raise RunError(f"source coverage 검증 실패: {details}") from exc
 
+    validate_scoped_map(state, read_json_object(source_map_path, "source map"))
+
     coverage_payload = read_json_object(coverage_path, "coverage report")
     note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
     if coverage_payload.get("note_mode") != note_mode:
@@ -1325,6 +1334,105 @@ def rebuild_roles_after_mode_change(
 # init/refresh/next/start/complete/fail/activate/deactivate가 실행 감사 기록을 만든다.
 # -----------------------------------------------------------------------------
 
+def scope_fingerprint(scope: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps(scope, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def validate_scoped_map(state: dict[str, Any], payload: dict[str, Any]) -> None:
+    validate_map_scope(payload, state.get("scope"))
+    if state.get("scope") is None:
+        return
+    inputs = {item["path"]: item for item in state["inputs"]}
+    for source in payload["source_files"]:
+        if source.get("sha256") != inputs[source["path"]]["sha256"]:
+            raise RunError(f"source map의 원본 해시가 다릅니다: {source['path']}")
+        evidence = source.get("evidence_path")
+        if not isinstance(evidence, str) or not Path(evidence).is_absolute() or not Path(evidence).is_file():
+            raise RunError(f"진도 근거 파일이 없거나 절대경로가 아닙니다: {source['path']}")
+        if sha256_file(Path(evidence)) != source.get("evidence_sha256"):
+            raise RunError(f"진도 근거 파일이 변경됐습니다: {source['path']}")
+
+
+def part_body(state: dict[str, Any]) -> Path:
+    suffix = ".tex" if state["note_mode"] == "deep" and state["output_format"] == "pdf" else ".md"
+    bodies = [Path(record["path"]) for record in state["roles"]["writer"].get("artifacts", [])
+              if Path(record["path"]).suffix.lower() == suffix and record.get("kind") == "file"]
+    if len(bodies) != 1:
+        raise RunError(f"진도별 writer 산출물에는 기준 {suffix} 원고가 정확히 하나 필요합니다.")
+    return bodies[0]
+
+
+def previous_parts(state: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]:
+    """이전 완료 상태를 읽기 전용으로 검증한다. 원고 본문을 모델 입력으로 출력하지 않는다."""
+    parts, seen = [], set()
+    record = state.get("continued_from")
+    while record is not None:
+        if not isinstance(record, dict) or record.get("kind") != "file" or not artifact_matches(record):
+            raise RunError("앞부분의 실행 기록이 변경되었거나 없습니다. 기존 검수를 그대로 재사용할 수 없습니다.")
+        path = Path(record["path"]).resolve()
+        if path in seen:
+            raise RunError("이어 쓰기 기록이 순환합니다.")
+        seen.add(path)
+        parent = read_state(path)
+        if not parent.get("scope") or not state.get("scope"):
+            raise RunError("앞부분과 이번 부분 모두 명시적인 진도 scope가 필요합니다.")
+        if Path(parent["input_root"]).resolve() != Path(state["input_root"]).resolve() or any(
+            parent[key] != state[key] for key in ("note_mode", "output_format")
+        ):
+            raise RunError("이어 쓰기는 같은 과목 입력 폴더·제작 모드·출력 형식을 사용해야 합니다.")
+        errors = verify_state(parent, check_inputs=True, check_previous=False)
+        if errors:
+            raise RunError(f"앞부분이 검수 완료 상태가 아닙니다: {path}: " + "; ".join(errors[:3]))
+        check_extension(parent["scope"], state["scope"])
+        part_body(parent)
+        parts.append((path, parent))
+        record = parent.get("continued_from")
+    return list(reversed(parts))
+
+
+def command_compose(args: argparse.Namespace) -> int:
+    state_file = args.state.expanduser().resolve()
+    state = read_state(state_file)
+    errors = verify_state(state, check_inputs=True)
+    if errors:
+        raise RunError("완료된 부분만 조합할 수 있습니다: " + "; ".join(errors[:4]))
+    if not state.get("scope"):
+        raise RunError("진도 조합에는 명시적인 scope가 필요합니다.")
+    parts = [*previous_parts(state), (state_file, state)]
+    bodies = [part_body(part) for _, part in parts]
+    output = args.output.expanduser().resolve()
+    if output.suffix.lower() != bodies[0].suffix.lower():
+        raise RunError("누적 원고는 부분 원고와 같은 확장자를 사용하십시오.")
+    # 입력·상태·승인 원고/산출물을 --force로 훼손하지 않는다.
+    for path, part in parts:
+        protected = [path, *[Path(part["input_root"]) / item["path"] for item in part["inputs"]]]
+        for entry in part["roles"].values():
+            for item in entry.get("artifacts", []):
+                target = Path(item["path"]).resolve()
+                if output == target or (item.get("kind") == "directory" and output.is_relative_to(target)):
+                    raise RunError("누적 원고로 승인 산출물을 덮어쓸 수 없습니다.")
+        if output in [path.resolve() for path in protected]:
+            raise RunError("누적 원고로 입력이나 실행 기록을 덮어쓸 수 없습니다.")
+    if output.exists() and not args.force:
+        raise RunError("누적 원고가 이미 있습니다. 교체할 때만 --force를 지정하십시오.")
+    if output.suffix.lower() == ".tex":
+        text = "% Generated composition; edit the registered part bodies, not this file.\n"
+        text += "\n".join(tex_part_input(body) for body in bodies)
+    else:
+        text = "\n\n".join(body.read_text(encoding="utf-8-sig").rstrip() for body in bodies) + "\n"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output.parent, delete=False) as stream:
+        staging = Path(stream.name)
+        stream.write(text)
+    try:
+        staging.replace(output)
+    finally:
+        staging.unlink(missing_ok=True)
+    print(json.dumps({"output": str(output), "parts": len(parts), "model_calls": 0,
+                      "next": "기존 build 명령으로 누적 원고를 PDF/학생용 Markdown으로 출력하고 배치 검수"}, ensure_ascii=False))
+    return 0
+
+
 def command_init(args: argparse.Namespace) -> int:
     root = args.root.expanduser().resolve()
     input_root = args.input_dir.expanduser().resolve()
@@ -1350,6 +1458,20 @@ def command_init(args: argparse.Namespace) -> int:
         )
     classification_overrides = parse_classification_overrides(input_root, args.classify)
     items = inventory(input_root, classification_overrides)
+    args.scope_payload = (
+        validate_scope(read_json_object(args.scope.expanduser().resolve(), "진도 범위"))
+        if getattr(args, "scope", None) else None
+    )
+    items = scoped_inventory(items, args.scope_payload)
+    args.previous_record = None
+    if getattr(args, "continue_from", None):
+        if args.scope_payload is None:
+            raise RunError("이어 쓰기에는 새 진도를 지정한 --scope가 필요합니다.")
+        args.previous_record = artifact_record(args.continue_from.expanduser().resolve())
+        # 폴더를 만들기 전에 완료·범위·원고 무결성을 확인한다.
+        previous_parts({"continued_from": args.previous_record, "scope": args.scope_payload,
+                        "input_root": str(input_root), "note_mode": args.note_mode,
+                        "output_format": args.output_format})
     with state_write_lock(state_file, create_parent=True):
         return locked_init(args, root, input_root, state_file, classification_overrides, items, runtime)
 
@@ -1407,6 +1529,11 @@ def locked_init(
         "roles": make_roles(items, args.output_format, args.note_mode, preprocessing),
         "events": [{"at": timestamp, "event": "initialized", "detail": f"입력 {len(items)}개"}],
     }
+    if getattr(args, "scope_payload", None) is not None:
+        state["scope"] = args.scope_payload
+        state["scope_sha256"] = scope_fingerprint(args.scope_payload)
+    if getattr(args, "previous_record", None) is not None:
+        state["continued_from"] = args.previous_record
     write_json(state_file, state)
     print(state_file)
     return 0
@@ -1443,6 +1570,7 @@ def command_status(args: argparse.Namespace) -> int:
 def command_next(args: argparse.Namespace) -> int:
     state_file = args.state.expanduser().resolve()
     state = read_state(state_file)
+    reused = previous_parts(state)
     refresh_statuses(state["roles"])
     note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
     execution_policy = state_execution_policy(state)
@@ -1483,6 +1611,15 @@ def command_next(args: argparse.Namespace) -> int:
         "cost_usage": state.get("cost_usage", new_cost_usage()),
         "ready": ready,
     }
+    if state.get("scope") is not None:
+        payload["scope"] = state["scope"]
+        payload["review_scope"] = "이번 범위 전체와 이전 부분과의 연결만 검수; 완료 원고 재집필·전체 재검수 금지"
+    if reused:
+        payload["reused_parts"] = [
+            {"state": str(path), "scope": parent["scope"], "body": str(part_body(parent))}
+            for path, parent in reused
+        ]
+        payload["boundary_context"] = "필요한 직전 절·기호·참조만 읽는다. 이전 원고 전체를 모델에 전달하지 않는다."
     if getattr(args, "brief", False):
         for key in ("runtime_model_table", "execution_profiles", "cost_policy", "cost_usage"):
             payload.pop(key, None)
@@ -1542,6 +1679,9 @@ def final_review_input_fingerprint(state: dict[str, Any]) -> str:
         "note_mode": state.get("note_mode", DEFAULT_NOTE_MODE),
         "evidence": evidence,
     }
+    if state.get("scope") is not None:
+        payload["scope"] = state["scope"]
+        payload["continued_from"] = state.get("continued_from")
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
         "utf-8"
     )
@@ -1732,7 +1872,7 @@ def locked_refresh_inputs(args: argparse.Namespace, state_file: Path) -> int:
     classification_overrides = parse_classification_overrides(
         input_root, args.classify, existing_overrides
     )
-    new_items = inventory(input_root, classification_overrides)
+    new_items = scoped_inventory(inventory(input_root, classification_overrides), state.get("scope"))
     changes = inventory_changes(state["inputs"], new_items)
     state["classification_overrides"] = classification_overrides
     if not changes:
@@ -2073,6 +2213,7 @@ def command_start(args: argparse.Namespace) -> int:
 
 def locked_start(args: argparse.Namespace, state_file: Path) -> int:
     state = read_state(state_file)
+    previous_parts(state)
     refresh_statuses(state["roles"])
     entry = get_role(state, args.role)
     if entry["status"] not in {"ready", "failed"}:
@@ -2146,6 +2287,7 @@ def command_complete(args: argparse.Namespace) -> int:
 
 def locked_complete(args: argparse.Namespace, state_file: Path) -> int:
     state = read_state(state_file)
+    previous_parts(state)
     entry = get_role(state, args.role)
     if entry["status"] != "running":
         raise RunError(f"실행 중인 역할만 완료할 수 있습니다: {args.role}={entry['status']}")
@@ -2262,8 +2404,9 @@ def changed_inputs(state: dict[str, Any]) -> list[str]:
             changed.append(f"삭제됨: {relative}")
         elif path.stat().st_size != item["bytes"] or sha256_file(path) != item["sha256"]:
             changed.append(f"변경됨: {relative}")
-    for relative in sorted(set(current_paths) - set(recorded)):
-        changed.append(f"추가됨: {relative}")
+    if state.get("scope") is None:
+        for relative in sorted(set(current_paths) - set(recorded)):
+            changed.append(f"추가됨: {relative}")
     return changed
 
 
@@ -2293,6 +2436,11 @@ def verify_coverage_gate(state: dict[str, Any]) -> list[str]:
     except CoverageValidationError as exc:
         errors.extend(f"source coverage: {issue.message}" for issue in exc.report.errors)
         return errors
+
+    try:
+        validate_scoped_map(state, read_json_object(source_path, "source map"))
+    except (RunError, OSError, ValueError) as exc:
+        errors.append(str(exc))
 
     payload = read_json_object(coverage_path, "coverage report")
     note_mode = state.get("note_mode", DEFAULT_NOTE_MODE)
@@ -2358,8 +2506,13 @@ def verify_premium_final_reviews(state: dict[str, Any]) -> list[str]:
     return errors
 
 
-def verify_state(state: dict[str, Any], check_inputs: bool) -> list[str]:
+def verify_state(state: dict[str, Any], check_inputs: bool, *, check_previous: bool = True) -> list[str]:
     errors: list[str] = []
+    if check_previous:
+        try:
+            previous_parts(state)
+        except (RunError, OSError, ValueError) as exc:
+            errors.append(str(exc))
     roles = state["roles"]
     for role in ROLE_ORDER:
         entry = roles[role]
@@ -2441,6 +2594,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="생략 시 faithful은 로컬 전처리, deep은 의미 대응. 기존 실행은 저장된 방식을 유지한다.",
     )
     init_parser.add_argument("--lecture-id", required=True)
+    init_parser.add_argument("--scope", type=Path, help="이번 수업 범위 JSON: label 및 sources의 pages/lines/segments 또는 all")
+    init_parser.add_argument("--continue-from", type=Path, help="앞부분의 검수가 완료된 run_state.json. 앞부분은 그대로 재사용한다.")
     init_parser.add_argument(
         "--output-format",
         choices=("md", "pdf", "docx"),
@@ -2474,6 +2629,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="자동 분류를 명시적으로 교정합니다. 예: 강의메모.txt=transcript",
     )
     init_parser.set_defaults(func=command_init)
+
+    compose_parser = subparsers.add_parser("compose", help="검수 완료된 진도별 원고를 모델 호출 없이 누적 원고로 연결합니다.")
+    compose_parser.add_argument("state", type=Path)
+    compose_parser.add_argument("--output", type=Path, required=True, help="누적 TeX 또는 Markdown 원고 경로")
+    compose_parser.add_argument("--force", action="store_true")
+    compose_parser.set_defaults(func=command_compose)
 
     for name, func, help_text in (
         ("status", command_status, "전체 역할 상태를 표시합니다."),
@@ -2602,7 +2763,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         return args.func(args)
-    except RunError as exc:
+    except (RunError, OSError, ValueError) as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 2
 
