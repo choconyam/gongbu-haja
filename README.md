@@ -136,7 +136,7 @@ gongbu setup-agents
 그 다음은 과목 폴더에서 한다. 과목 폴더 하나가 자기 자료·녹음·상태·노트를 전부 갖고, 다른 과목과 섞이지 않는다.
 
 ```text
-C:\강의\미디어빅뱅과방송\                    ← 과목 폴더 (여기서 gongbu 실행, AI 도구도 여기서 열기)
+C:\강의\과목A\                              ← 과목 폴더 (여기서 gongbu 실행, AI 도구도 여기서 열기)
 ├─ 2026-03-10_1주차\                         ← 강의별 하위폴더 = 입력
 │  ├─ 1주차_교안.pdf
 │  └─ 2026-03-10_1주차_20260310_090000.wav    ← gongbu record 결과
@@ -145,7 +145,7 @@ C:\강의\미디어빅뱅과방송\                    ← 과목 폴더 (여기
 ```
 
 ```bash
-cd C:\강의\미디어빅뱅과방송
+cd C:\강의\과목A
 gongbu setup                                        # .gongbu/, output/, .gitignore(녹음·상태 제외) 준비
 gongbu record --lecture-id 2026-03-10_1주차          # 온라인 강의 녹음 (Windows) → 2026-03-10_1주차\ 아래 WAV
 gongbu transcribe 2026-03-10_1주차\녹음.wav          # 로컬 전사 → .gongbu\2026-03-10_1주차\transcript\

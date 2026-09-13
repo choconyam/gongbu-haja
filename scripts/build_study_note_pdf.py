@@ -6,7 +6,7 @@
 않기 위해 만든 공통 빌더라서 과목·차시·요약만 인자로 받는다.
 
     python scripts/build_study_note_pdf.py work/note_draft.md --output output/노트.pdf \
-        --course "미디어빅뱅과방송" --session "1주차 2차시" --summary "미디어의 개념과 사회적 기능"
+        --course "과목A" --session "1주차 2차시" --summary "핵심 개념과 적용"
 
 기존 PDF 경로의 글꼴은 Windows 한글 TrueType을 순서대로 찾는다. 다른 OS에서는
 `--font-body` / `--font-head` 로 TTF 경로를 준다. DEEP PDF는 --note-mode deep과
