@@ -53,7 +53,6 @@ Use when no template or legacy series is designated.
 - Title page only for a substantial handout; otherwise begin with title, scope, and learning goals.
 - Add contents when navigation benefits.
 - Use page or source images only when the learner needs to inspect the visual itself.
-- Finish with an appropriate synthesis: formula table, timeline, concept map, comparison table, or key takeaways.
 
 ## Classic Red Profile — Legacy Compatibility
 
@@ -64,7 +63,7 @@ Use when matching the consolidated AI-note series or when the user requests the 
 - Body: `Noto Serif CJK KR`; headings: `Noto Sans CJK KR`; code: `Noto Sans Mono CJK KR` or nearest installed equivalents.
 - Line spacing about 1.21; first-line indent 1.2 em; paragraph spacing about 0.35 em.
 - Accent `#A61E2D`; soft gray `#F7F7F7`; line gray `#D9D9D9`; deep gray `#444444`.
-- For slide-by-slide explanation notes: title page, `Contents`, source-page-numbered sections, source image near `0.79\textwidth`, caption `원본 PDF p.[number]`, and a final synthesis.
+- For slide-by-slide explanation notes: title page, `Contents`, source-page-numbered sections, source image near `0.79\textwidth`, and caption `원본 PDF p.[number]`.
 - Use pale-gray breakable callouts with the red accent for key intuition, exam points, source corrections, and uncertainty.
 
 Do not force page-numbered sections or source images when the request is not slide-based.
@@ -115,18 +114,6 @@ Use callouts sparingly and by function:
 - uncertainty or external verification.
 
 A warning callout should state the judgment first, then the evidence, then the reading adopted in the note.
-
-## Final Synthesis
-
-Match the subject:
-
-- quantitative: `topic / key equation / meaning or use`;
-- history: `period or event / cause / development / consequence`;
-- concepts: `term / definition / distinction / example`;
-- code: `component / input-output / role / failure mode`;
-- problem solving: `problem cue / method / checks / common error`.
-
-End with a concise integrative statement or retrieval prompt when helpful. Do not force a formula summary onto a non-formula course.
 
 ## Visual QA
 
