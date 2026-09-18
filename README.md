@@ -1,4 +1,4 @@
-# 범용 강의 학습노트 프로젝트
+# gongbu-haja — 교안과 녹음으로 만드는 학습노트
 
 [![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fchoconyam%2Fgongbu-haja%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=version&color=blue)](.claude-plugin/plugin.json)
 [![license MIT](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
@@ -15,7 +15,10 @@
   수업 때 놓친 설명은 녹음에서 찾아 채웁니다. 전사는 내 컴퓨터에서 돌아갑니다.
 </p>
 
-> **EN** — A Korean-language study-note workflow that turns lecture handouts and recordings into traceable notes. New notes are produced by the model and reasoning level already selected in the user's current session; deterministic extraction, transcription, build, and structural checks stay local. Optional managed runs retain role-separated agents and reproducible gates.
+> [!IMPORTANT]
+> **당부의 말** — 제가 알아본 바로는, 혼자 공부하려고 강의를 녹음하는 것은 문제가 없습니다. 하지만 녹음이나 전사본, 그걸로 만든 노트를 남에게 공유하거나 판매하는 순간 이야기가 달라집니다. 이 도구는 혼자 공부하는 용도로 만들었습니다.
+
+> **English**: [`README.en.md`](README.en.md)
 
 교안과 수업 녹음을 함께 읽고, 어느 과목이든 근거를 따라갈 수 있는 학습노트를 만듭니다. 교안에 없는 설명도 녹음에서 찾아 채웁니다. 규칙과 역할 프롬프트, 스크립트는 모두 이 저장소 안에 있습니다(`agent_prompts/`, `rules/`, `scripts/`).
 
@@ -29,6 +32,31 @@
 </p>
 
 <p align="center"><sub>실제 강의 자료 대신 자리만 표시한 구성 예시입니다. 회색 막대는 본문 문장, 점선 상자는 교안 PDF의 해당 쪽이 그대로 들어가는 자리입니다.</sub></p>
+
+## 무엇이 달라지나
+
+교안에는 한 줄만 있고, 중요한 설명은 교수님이 말로만 하고 지나갑니다. 이 프로젝트는 그 둘을 한자리에 붙여 줍니다. 아래는 지어낸 예시입니다.
+
+| | |
+|---|---|
+| **교안 슬라이드** | 수요의 가격탄력성 = 수요량 변화율 ÷ 가격 변화율 |
+| **교수님이 말로만 한 설명** | “탄력성이 1보다 크면 가격을 내려야 매출이 늘어요. 그래서 할인 행사는 대체재가 많은 상품에 합니다. 부호는 음수로 나오는데 보통 절댓값으로 읽습니다.” |
+
+**자료 충실형 노트에는 이렇게 들어갑니다.**
+
+> **수요의 가격탄력성** = 수요량 변화율 ÷ 가격 변화율
+>
+> 교수 설명: 탄력성이 1보다 크면 가격을 내릴 때 매출이 늘어난다. 그래서 할인 행사는 대체재가 많은 상품에 한다. 계산하면 부호는 음수지만 보통 절댓값으로 읽는다.
+
+심화 이해형이라면 여기에 “왜 1이 기준인가”(매출 = 가격 × 수량이므로 수량이 가격보다 크게 움직일 때만 매출이 늘어난다) 같은 중간 과정을 확인해 덧붙입니다. 교안에 없던 내용은 어디서 왔는지 표시하고, 녹음에서 확실히 알아듣지 못한 부분은 지어내지 않고 `[확인 필요]`로 남깁니다.
+
+## 이럴 때 씁니다
+
+- **수업 때 설명을 놓쳤을 때** — 녹음을 내 컴퓨터에서 받아 적고, 교안의 해당 쪽 아래에 그 설명을 붙입니다.
+- **시험 전에 빠르게 복습할 때** — 자료 충실형으로 교안과 교수님 설명만 추려 외우기 좋게 정리합니다.
+- **교안만 봐서는 이해가 안 될 때** — 심화 이해형으로 빠진 배경과 중간 과정을 채웁니다.
+- **오늘 진도까지만 필요할 때** — 배운 쪽까지만 만들고, 다음 수업 뒤에 이어서 씁니다. 앞부분은 다시 만들지 않습니다.
+- **온라인 강의를 들을 때** — Windows에서는 재생되는 소리를 바로 녹음할 수 있습니다(수강·녹음 권한을 확인한 강의만).
 
 ## 한 줄로 보는 사용법
 
@@ -53,6 +81,18 @@
 git clone https://github.com/choconyam/gongbu-haja
 cd gongbu-haja
 ```
+
+<details>
+<summary>Claude Code를 쓴다면 클론 없이 플러그인으로도 됩니다</summary>
+
+```text
+/plugin marketplace add choconyam/gongbu-haja
+/plugin install gongbu-haja@gongbu-haja
+```
+
+설치한 뒤에는 교안과 녹음을 모아 둔 과목 폴더에서 바로 “이 자료로 학습노트 만들어줘”라고 하면 됩니다. 엔진 저장소가 없으면 승인을 받아 `~/gongbu-haja`에 받아옵니다. Codex 스킬과 전역 CLI(`gongbu`) 설치는 [설치와 첫 사용](docs/install.md)에 있습니다.
+
+</details>
 
 **2. 자료 넣기** — `input/` 아래에 강의별 폴더를 만들고 교안과 녹음(또는 전사본)을 넣습니다.
 
