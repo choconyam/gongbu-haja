@@ -392,6 +392,12 @@ def validate(root: Path) -> Report:
         "CLAUDE.md",
         "LICENSE",
         "README.md",
+        # README에서 분리한 방문자용 문서. README의 문서 표가 이 파일들을 가리킨다.
+        "docs/install.md",
+        "docs/transcription.md",
+        "docs/managed-run.md",
+        "docs/architecture.md",
+        "docs/development.md",
         ".gitignore",
         ".gitattributes",
         "requirements-recording.txt",
