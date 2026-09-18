@@ -205,7 +205,7 @@ gongbu-haja/
 ├─ README.md                    방문자용 소개와 3단계 시작
 ├─ docs/                        설치·전사·관리형 실행·구조·개발 검증 문서
 ├─ CHANGELOG.md                 버전별 변경 내역
-├─ assets/                      README 배너 이미지
+├─ assets/                      README 배너·결과물 구성 예시 이미지
 ├─ .github/workflows/           push·PR마다 도는 검증 CI
 ├─ note_final_rules.md
 ├─ 강의녹음.bat                Windows 온라인 강의 시스템 오디오 녹음

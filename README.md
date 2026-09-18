@@ -20,12 +20,12 @@
 
 ## 결과물 미리보기
 
-<!-- 결과물 이미지 자리: assets/ 에 스크린샷(예: assets/sample-faithful.png, assets/sample-deep.png)을 넣고 아래 주석을 풀어 쓴다.
 <p align="center">
-  <img src="assets/sample-faithful.png" alt="자료 충실형 Markdown 노트 예시" width="48%">
-  <img src="assets/sample-deep.png" alt="심화 이해형 PDF 노트 예시" width="48%">
+  <img src="assets/sample-faithful.svg" alt="자료 충실형 Markdown 노트의 구성 예시" width="48%">
+  <img src="assets/sample-deep.svg" alt="심화 이해형 PDF 노트의 배치 예시: 원본 교안 슬라이드 아래에 대응 설명" width="48%">
 </p>
--->
+
+실제 강의 자료 대신 자리만 표시한 구성 예시다. 회색 막대는 본문 문장, 점선 상자는 교안 PDF의 해당 쪽이 그대로 들어가는 자리다.
 
 자료 충실형은 바로 읽고 고칠 수 있는 Markdown, 심화 이해형은 원본 슬라이드 아래에 설명과 유도를 배치한 인쇄용 PDF가 나온다.
 
