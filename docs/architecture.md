@@ -210,7 +210,7 @@ gongbu-haja/
 ├─ LICENSE                      MIT
 ├─ README.md                    방문자용 소개와 3단계 시작
 ├─ docs/                        설치·전사·관리형 실행·구조·개발 검증 문서
-├─ CHANGELOG.md                 버전별 변경 내역
+├─ CHANGELOG.md                 버전별 패치노트와 Before/After
 ├─ assets/                      README 배너·결과물 구성 예시 이미지
 ├─ .github/workflows/           push·PR마다 도는 검증 CI
 ├─ note_final_rules.md
