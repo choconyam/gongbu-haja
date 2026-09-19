@@ -75,6 +75,10 @@ class ApplyTranscriptCorrectionsTests(unittest.TestCase):
             self.assertEqual("다음 설명", reviewed["segments"][1]["text"])
             self.assertEqual(1, reviewed["review"]["replacement_count"])
             self.assertEqual(original, source.read_bytes())
+            markdown = Path(result["transcript_reviewed"]).read_text(encoding="utf-8")
+            self.assertIn("공진 주파수가 12Hz다\n다음 설명", markdown)
+            self.assertNotIn("00:00:00", markdown)
+            self.assertNotIn("화자 불명", markdown)
 
     def test_rejects_stale_hash_and_original_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

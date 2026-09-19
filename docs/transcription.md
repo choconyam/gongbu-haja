@@ -80,11 +80,11 @@ GPU 없음       → 실행 가능하나 1시간 강의당 약 20~40분 소요 (
 | 2–3GB | `small` int8 (GPU) | |
 | GPU 없음·감지 실패 | `small` int8 (CPU) | 느리지만 동작 |
 
-`--model large-v3`처럼 이름을 직접 지정하면 자동 선택을 건너뛴다. 언어 기본값은 한국어이며 GPU 추론 중 오류가 나면 CPU로 처음부터 다시 시도한다. 실제 사용한 모델과 선택 방식은 전사 manifest의 `model`, `model_selection`, `model_tier`에 기록되어 전사 검수 담당이 표본 범위를 정할 때 활용한다.
+`--model large-v3`처럼 이름을 직접 지정하면 자동 선택을 건너뛴다. 언어 기본값은 한국어이며 GPU 추론 중 오류가 나면 CPU로 처음부터 다시 시도한다. 실제 사용한 모델과 선택 방식은 전사 manifest의 `model`, `model_selection`, `model_tier`에 기록되어 이상 후보의 우선순위를 판단할 때 활용한다.
 
 기존 동일 산출물은 자동으로 덮어쓰지 않는다. 의도적으로 교체하는 경우에만 `--force`를 사용한다.
 
-전사가 끝난 뒤 Python으로 용어 후보와 검수할 구간만 추린다. 이 명령은 전사를 고치지 않으며, PDF에서 발견한 표현도 최종 전문용어로 확정하지 않는다.
+전사가 끝난 뒤 Python으로 용어 후보와 검토할 구간만 추린다. 이 명령은 전사를 고치거나 원음을 듣지 않으며, PDF에서 발견한 표현도 최종 전문용어로 확정하지 않는다. 학습노트를 만들 때는 간결형 Markdown과 교안을 강의 순서대로 함께 보고, 교안으로 풀리지 않는 시험 핵심 구간만 SRT·segments의 시간 정보를 이용해 다시 듣는다.
 
 ```powershell
 python scripts/prepare_transcript_review.py `
@@ -142,4 +142,4 @@ workspace/<lecture_id>/transcript/
 └─ <lecture_id>_transcript_manifest.json
 ```
 
-SRT는 타임스탬프 기준 원시 전사, TXT는 검색용 원문, Markdown은 검수 작업본이다. `segments.json`에는 구간별 신뢰도 관련 값이 들어가고 manifest에는 원본 파일 해시, 모델, 장치, 언어, 강의 식별 정보가 기록된다.
+SRT는 타임스탬프 기준 원시 전사, TXT는 검색용 원문이다. Markdown은 발언 순서를 유지하면서 타임스탬프와 반복 `[화자 불명]`을 뺀 학습노트 입력용 초안이다. 여러 화자의 구분이 내용에 필요할 때만 기능 화자명이 남는다. `segments.json`에는 구간별 시간과 신뢰도 관련 값이 들어가고 manifest에는 원본 파일 해시, 모델, 장치, 언어, 강의 식별 정보가 기록된다.

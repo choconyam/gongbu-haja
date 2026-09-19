@@ -305,9 +305,8 @@ def validate(args: argparse.Namespace) -> Report:
     timestamps = extract_timestamps(text, transcript, report)
     report.metrics["timestamp_entries"] = len(timestamps)
     require_timestamps = args.require_timestamps or suffix in {".srt", ".vtt"}
-    if not timestamps:
-        severity = "error" if require_timestamps else "warning"
-        report.add(severity, "missing-timestamps", "전사본에서 시간표시를 찾지 못했습니다.", transcript)
+    if not timestamps and require_timestamps:
+        report.add("error", "missing-timestamps", "전사본에서 시간표시를 찾지 못했습니다.", transcript)
 
     uncertainty_count = len(UNCERTAINTY_RE.findall(text))
     placeholder_count = len(RAW_PLACEHOLDER_RE.findall(text))

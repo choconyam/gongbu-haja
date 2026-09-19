@@ -616,20 +616,39 @@ def render_raw_text(records: list[dict[str, Any]]) -> str:
     return "\n".join(record["text"] for record in records).strip() + "\n"
 
 
-def render_draft_markdown(identity: LectureIdentity, records: list[dict[str, Any]]) -> str:
-    lines = [
-        f"# {identity.lecture_id} 강의 전사 초안",
-        "",
-        "> 자동 전사 초안입니다. 음성 대조 전에는 교수의 확정 발언이나 직접 인용으로 사용하지 않습니다.",
-        "",
-    ]
+def render_compact_transcript(
+    title: str, records: list[dict[str, Any]]
+) -> str:
+    """학습노트 입력용 전사를 시간표시 없이 발언 순서대로 만든다.
+
+    재청취 위치와 신뢰도는 SRT·segments JSON에 보존한다. Markdown에는
+    여러 화자의 구분이 실제로 있을 때만 기능 화자명을 남긴다.
+    """
+
+    unknown_speakers = {"", "unknown", "화자 불명", "[화자 불명]"}
+    speakers = {
+        str(record.get("speaker", "")).strip()
+        for record in records
+        if str(record.get("speaker", "")).strip().casefold()
+        not in {value.casefold() for value in unknown_speakers}
+    }
+    keep_speakers = len(speakers) > 1
+    lines = [f"# {title}", ""]
     for record in records:
-        lines.append(
-            f"[{format_clock(record['start'])}–{format_clock(record['end'])}] "
-            f"[화자 불명] {record['text']}"
-        )
-        lines.append("")
+        utterance = str(record.get("text", "")).strip()
+        if not utterance:
+            continue
+        speaker = str(record.get("speaker", "")).strip()
+        if keep_speakers and speaker and speaker.casefold() not in {
+            value.casefold() for value in unknown_speakers
+        }:
+            utterance = f"{speaker}: {utterance}"
+        lines.append(utterance)
     return "\n".join(lines).rstrip() + "\n"
+
+
+def render_draft_markdown(identity: LectureIdentity, records: list[dict[str, Any]]) -> str:
+    return render_compact_transcript(f"{identity.lecture_id} 강의 전사 초안", records)
 
 
 # -----------------------------------------------------------------------------

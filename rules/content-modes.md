@@ -22,7 +22,7 @@ Misrouting decisions propagate downstream: treating an economics lecture as huma
 
 ### Demonstration, studio, and seminar material
 
-- For screen demonstrations, performances, or clinical/skill practice, the recording shows actions the transcript cannot carry. Mark such spans as `[시연 HH:MM:SS 대상]` with the demonstrated object, keep the timestamp so a reviewer can re-watch, and describe in the note what was demonstrated and what the learner should be able to reproduce.
+- For screen demonstrations, performances, or clinical/skill practice, the recording shows actions the transcript cannot carry. Mark the demonstrated object in the compact transcript, keep its timestamp in the internal SRT/segments mapping so a reviewer can re-watch, and describe in the note what was demonstrated and what the learner should be able to reproduce.
 - For seminar or discussion sessions with multiple speakers, extend functional speaker labels (`발표자 1`, `발표자 2`, `사회자`) without guessing identity, and preserve who claimed what when positions conflict.
 
 ## STEM and Quantitative Material
@@ -107,12 +107,12 @@ Treat transcripts as a core interpretation layer when they accompany slides or h
 
 Before integration, route the material by source state:
 
-- recording only: transcribe, validate the transcript package, then audit against audio and align to the handout;
+- recording only: transcribe, validate the transcript package, then compare the compact transcript with the handout and check only unresolved learning-critical spans against audio;
 - transcript only: preserve it as transcript-only and do not claim audio verification;
-- recording plus transcript: preserve the provided transcript as an input and audit it against the recording;
-- reviewed transcript plus alignment map: proceed to instructor-content integration.
+- recording plus transcript: preserve the provided transcript as an input, compare it with the handout, and use the recording only for unresolved learning-critical spans;
+- compact transcript plus internal timestamp mapping: proceed to instructor-content integration while resolving key uncertainties as they arise.
 
-Do not write learning notes directly from raw ASR output. Keep timestamps near uncertain wording, quantitative statements, equations read aloud, corrections, and assessment cues so a reviewer can return to the recording.
+Do not treat raw ASR as verified speech. Read the compact transcript alongside the handout, use the handout to resolve obvious recognition errors, and check audio only when learning-critical wording remains uncertain. Keep return-to-audio timestamps in SRT/segments rather than repeating them in the note-input Markdown.
 
 Extract and map:
 

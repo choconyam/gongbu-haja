@@ -140,29 +140,26 @@ def validate_decisions(
     return checked
 
 
-def format_clock(seconds: Any) -> str:
-    try:
-        total = max(0, int(float(seconds)))
-    except (TypeError, ValueError):
-        return "??:??:??"
-    hours, remainder = divmod(total, 3600)
-    minutes, secs = divmod(remainder, 60)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
-
 def render_reviewed_markdown(lecture_id: str, segments: list[dict[str, Any]]) -> str:
-    lines = [
-        f"# {lecture_id} 강의 전사 검수본",
-        "",
-        "> 승인된 구간별 교정만 적용한 작업본입니다. 음성 검증 범위는 별도 manifest를 따릅니다.",
-        "",
-    ]
+    unknown_speakers = {"", "unknown", "화자 불명", "[화자 불명]"}
+    speakers = {
+        str(segment.get("speaker", "")).strip()
+        for segment in segments
+        if str(segment.get("speaker", "")).strip().casefold()
+        not in {value.casefold() for value in unknown_speakers}
+    }
+    keep_speakers = len(speakers) > 1
+    lines = [f"# {lecture_id} 강의 전사 검수본", ""]
     for segment in segments:
-        lines.append(
-            f"[{format_clock(segment.get('start'))}–{format_clock(segment.get('end'))}] "
-            f"[화자 불명] {segment['text']}"
-        )
-        lines.append("")
+        utterance = str(segment.get("text", "")).strip()
+        if not utterance:
+            continue
+        speaker = str(segment.get("speaker", "")).strip()
+        if keep_speakers and speaker and speaker.casefold() not in {
+            value.casefold() for value in unknown_speakers
+        }:
+            utterance = f"{speaker}: {utterance}"
+        lines.append(utterance)
     return "\n".join(lines).rstrip() + "\n"
 
 

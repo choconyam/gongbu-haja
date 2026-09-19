@@ -192,6 +192,30 @@ class OutputGuardTests(unittest.TestCase):
             tl.ensure_outputs_available(paths, force=True)
 
 
+class CompactTranscriptTests(unittest.TestCase):
+    def test_draft_omits_timestamps_and_unknown_speaker_labels(self) -> None:
+        identity = tl.LectureIdentity("week1", "테스트", None, "본강의", False)
+        records = [
+            {"start": 0.0, "end": 1.0, "text": "첫 설명"},
+            {"start": 1.0, "end": 2.0, "text": "둘째 설명", "speaker": "[화자 불명]"},
+        ]
+        rendered = tl.render_draft_markdown(identity, records)
+        self.assertIn("첫 설명\n둘째 설명", rendered)
+        self.assertNotIn("00:00:00", rendered)
+        self.assertNotIn("화자 불명", rendered)
+
+    def test_speaker_labels_are_kept_only_for_real_multi_speaker_content(self) -> None:
+        one_speaker = [{"text": "설명", "speaker": "교수"}]
+        multi_speaker = [
+            {"text": "질문", "speaker": "학생"},
+            {"text": "답변", "speaker": "교수"},
+        ]
+        self.assertNotIn("교수:", tl.render_compact_transcript("전사", one_speaker))
+        rendered = tl.render_compact_transcript("전사", multi_speaker)
+        self.assertIn("학생: 질문", rendered)
+        self.assertIn("교수: 답변", rendered)
+
+
 class ManifestTests(unittest.TestCase):
     RECORDS = [{"id": 1, "start": 0.0, "end": 1.0, "text": "안녕하세요"}]
 

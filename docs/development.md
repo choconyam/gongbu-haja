@@ -15,9 +15,10 @@
 ```powershell
 python scripts/validate_transcript_package.py <전사본> `
   --audio <녹음> `
-  --manifest <메타데이터_JSON> `
-  --require-timestamps
+  --manifest <메타데이터_JSON>
 ```
+
+간결형 Markdown은 시간표시가 없는 것이 정상이다. 타임스탬프 자체를 검사할 때는 `<전사본>`에 원시 SRT를 넣거나 명시적으로 `--require-timestamps`를 사용한다.
 
 최종 노트:
 
