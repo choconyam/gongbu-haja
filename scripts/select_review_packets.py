@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""검수 manifest의 메타데이터만 사용해 읽을 packet을 선택한다.
+"""검수 manifest의 메타데이터로 읽을 packet을 선택하고 선택분을 검증한다.
 
-개별 packet 본문은 읽지 않는다. 이 모듈의 선택은 이유 우선순위, 명시적
-필터, 파일 크기와 경로 검증처럼 결정적인 조건에만 근거한다.
+선택 순위와 예산 계산은 manifest 메타데이터만 사용한다. 예산 안에 들어온
+packet만 제한된 크기로 읽어 JSON/schema와 manifest 대응을 확인한다.
 """
 
 from __future__ import annotations
@@ -117,6 +117,7 @@ def load_manifest(path: Path) -> tuple[Path, dict[str, Any], list[dict[str, Any]
             {
                 "packet_id": packet_id,
                 "path": relative_path.as_posix(),
+                "_resolved_path": resolved,
                 "target_segment_ids": target_ids,
                 "candidate_reasons": reasons,
                 "bytes": actual_bytes,
@@ -124,6 +125,46 @@ def load_manifest(path: Path) -> tuple[Path, dict[str, Any], list[dict[str, Any]
             }
         )
     return manifest_path, payload, checked
+
+
+def _validate_selected_packet(entry: dict[str, Any]) -> None:
+    """선택된 packet만 bounded read로 읽어 manifest 대응을 확인한다."""
+    path = entry["_resolved_path"]
+    expected_bytes = entry["bytes"]
+    try:
+        before = path.stat().st_size
+    except OSError as exc:
+        raise SelectionError(f"선택한 packet을 확인할 수 없습니다: {path}: {exc}") from exc
+    if before != expected_bytes:
+        raise SelectionError(
+            f"선택한 packet 크기가 manifest와 다릅니다: {entry['packet_id']} "
+            f"({before} != {expected_bytes})"
+        )
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(expected_bytes + 1)
+        after = path.stat().st_size
+    except OSError as exc:
+        raise SelectionError(f"선택한 packet을 읽을 수 없습니다: {path}: {exc}") from exc
+    if before != after or len(raw) != expected_bytes:
+        raise SelectionError(
+            f"선택한 packet이 읽는 중 변경되었거나 크기 상한을 넘었습니다: {entry['packet_id']}"
+        )
+    try:
+        packet = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SelectionError(f"선택한 packet JSON을 읽을 수 없습니다: {entry['packet_id']}: {exc}") from exc
+    if not isinstance(packet, dict):
+        raise SelectionError(f"선택한 packet 최상위 값은 객체여야 합니다: {entry['packet_id']}")
+    if type(packet.get("schema_version")) is not int or packet["schema_version"] != 1:
+        raise SelectionError(f"선택한 packet schema_version이 1이 아닙니다: {entry['packet_id']}")
+    if packet.get("kind") != "transcript_review_packet":
+        raise SelectionError(f"선택한 packet kind가 올바르지 않습니다: {entry['packet_id']}")
+    if packet.get("model_input") is not True:
+        raise SelectionError(f"선택한 packet model_input은 true여야 합니다: {entry['packet_id']}")
+    for key in ("packet_id", "target_segment_ids", "candidate_reasons"):
+        if packet.get(key) != entry[key]:
+            raise SelectionError(f"선택한 packet의 {key}가 manifest와 다릅니다: {entry['packet_id']}")
 
 
 def select_packets(
@@ -162,14 +203,27 @@ def select_packets(
                 "packet_id": entry["packet_id"],
                 "path": entry["path"],
                 "candidate_reasons": entry["candidate_reasons"],
+                "_resolved_path": entry["_resolved_path"],
+                "target_segment_ids": entry["target_segment_ids"],
                 "bytes": entry["bytes"],
             }
         )
         total_bytes += entry["bytes"]
+    for entry in selected:
+        _validate_selected_packet(entry)
+    public_selected = [
+        {
+            "packet_id": entry["packet_id"],
+            "path": entry["path"],
+            "candidate_reasons": entry["candidate_reasons"],
+            "bytes": entry["bytes"],
+        }
+        for entry in selected
+    ]
     return {
         "manifest": manifest.name,
-        "selected": selected,
-        "selected_count": len(selected),
+        "selected": public_selected,
+        "selected_count": len(public_selected),
         "total_bytes": total_bytes,
         "max_total_bytes": max_total_bytes,
     }

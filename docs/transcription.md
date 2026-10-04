@@ -96,7 +96,7 @@ python scripts/prepare_transcript_review.py `
 
 `*_term_candidates.json`은 전체 용어 후보 캐시이고 `*_review_packets.json`은 요약·경로만 담은 로컬 색인이다. manifest를 포함한 세 파일은 `model_input=false`라서 모델에 전달하지 않는다. 아래 selector가 고른 `*_packets/packet_NNNN.json`만 합계 16KiB 이하로 전사 검수 하위 에이전트에 전달한다. 각 개별 패킷은 `model_input=true`이며 관련 용어 후보를 최대 6개만 포함한다.
 
-manifest도 모델이 읽지 않는다. 다음 로컬 selector가 실제 ASR 이상을 단순 숫자·평가조건 후보보다 먼저 고르고, 선택 결과 총합을 기본 16KiB 아래로 제한한다. 필요하면 `--reason`이나 `--segment-id`를 반복해 정확한 후보만 고른다. 출력 경로는 manifest 폴더 기준 상대 경로다.
+manifest도 모델이 읽지 않는다. 다음 로컬 selector가 실제 ASR 이상을 단순 숫자·평가조건 후보보다 먼저 고르고, 선택 결과 총합을 기본 16KiB 아래로 제한한다. 선택된 파일만 Python으로 읽어 검수용 JSON인지, 모델 입력이 허용되어 있는지, 색인과 일치하는지 확인한다. 잘못된 파일이 있으면 경로 목록을 내보내지 않고 오류를 안내한다. 필요하면 `--reason`이나 `--segment-id`를 반복해 정확한 후보만 고른다. 출력 경로는 manifest 폴더 기준 상대 경로다.
 
 ```powershell
 python scripts/select_review_packets.py `
@@ -104,7 +104,7 @@ python scripts/select_review_packets.py `
   --max-total-bytes 16384
 ```
 
-검수 에이전트는 자동 치환을 직접 하지 않고 `source_segments_sha256`, `segment_id`, 정확한 `original`, `action`, `replacement`, `verification`, `rationale`를 담은 결정 JSON을 만든다. Python은 해시와 현재 원문이 모두 일치할 때만 파생 검수본에 적용한다.
+검수 에이전트는 자동 치환을 직접 하지 않고 `source_segments_sha256`, `segment_id`, 정확한 `original`, `action`, `replacement`, `verification`, `rationale`를 담은 결정 JSON을 만든다. Python은 해시와 현재 원문이 모두 일치할 때만 파생 검수본에 적용한다. `replace`에는 교안·문맥·원음 등 확인 근거를 지정해야 하며, `unverified`이거나 확인 근거가 빠진 결정은 적용하지 않는다. 확정하지 못한 구간은 `keep` 또는 `unresolved`로 원문을 보존한다.
 
 ```powershell
 python scripts/apply_transcript_corrections.py `
@@ -143,3 +143,5 @@ workspace/<lecture_id>/transcript/
 ```
 
 SRT는 타임스탬프 기준 원시 전사, TXT는 검색용 원문이다. Markdown은 발언 순서를 유지하면서 타임스탬프와 반복 `[화자 불명]`을 뺀 학습노트 입력용 초안이다. 여러 화자의 구분이 내용에 필요할 때만 기능 화자명이 남는다. `segments.json`에는 구간별 시간과 신뢰도 관련 값이 들어가고 manifest에는 원본 파일 해시, 모델, 장치, 언어, 강의 식별 정보가 기록된다.
+
+전사 패키지 검사에 `--audio`를 지정하면 manifest의 `source_audio_sha256`와 실제 녹음을 대조한다. 해시가 없거나 다르면 오류를 안내하므로, 같은 파일명의 다른 녹음을 기존 전사에 연결할 수 없다. 녹음 없이 전사본만 검사할 때는 녹음 해시를 요구하지 않는다.

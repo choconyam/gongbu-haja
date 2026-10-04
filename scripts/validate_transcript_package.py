@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -201,12 +202,25 @@ def validate_audio(path: Path | None, report: Report) -> Path | None:
     if not resolved.is_file():
         report.add("error", "missing-audio", "연결된 녹음 파일이 없습니다.", resolved)
         return None
-    report.metrics["audio_bytes"] = resolved.stat().st_size
-    if resolved.stat().st_size == 0:
+    try:
+        audio_bytes = resolved.stat().st_size
+    except OSError as exc:
+        report.add("error", "audio-stat", f"녹음 파일 정보를 읽을 수 없습니다: {exc}", resolved)
+        return None
+    report.metrics["audio_bytes"] = audio_bytes
+    if audio_bytes == 0:
         report.add("error", "empty-audio", "녹음 파일이 비어 있습니다.", resolved)
     if resolved.suffix.lower() not in AUDIO_SUFFIXES:
         report.add("warning", "unrecognized-audio-format", f"일반적인 녹음 형식이 아닙니다: {resolved.suffix}", resolved)
     return resolved
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def load_manifest(path: Path | None, audio: Path | None, uncertainty_count: int, report: Report) -> None:
@@ -262,6 +276,28 @@ def load_manifest(path: Path | None, audio: Path | None, uncertainty_count: int,
 
     source_audio = payload.get("source_audio")
     if audio is not None:
+        expected_hash = payload.get("source_audio_sha256")
+        if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", expected_hash):
+            report.add(
+                "error",
+                "invalid-audio-hash",
+                "녹음이 지정된 manifest에는 64자리 hexadecimal source_audio_sha256가 필요합니다.",
+                resolved,
+            )
+        else:
+            try:
+                actual_hash = sha256_file(audio)
+            except OSError as exc:
+                report.add("error", "audio-hash-read", f"녹음 해시를 계산할 수 없습니다: {exc}", audio)
+            else:
+                report.metrics["audio_sha256"] = actual_hash
+                if actual_hash.casefold() != expected_hash.casefold():
+                    report.add(
+                        "error",
+                        "audio-hash-mismatch",
+                        "manifest의 source_audio_sha256와 검사 대상 녹음의 SHA-256이 다릅니다.",
+                        resolved,
+                    )
         if not isinstance(source_audio, str) or not source_audio.strip():
             report.add("error", "missing-audio-reference", "녹음이 지정됐지만 manifest의 source_audio가 비어 있습니다.", resolved)
         elif Path(source_audio).name.casefold() != audio.name.casefold():

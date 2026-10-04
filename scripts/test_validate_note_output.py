@@ -6,7 +6,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from scripts.validate_note_output import Report, check_common_text
+from scripts.validate_note_output import Report, check_common_text, validate_markdown
 
 
 class ValidateNoteOutputTests(unittest.TestCase):
@@ -35,6 +35,21 @@ class ValidateNoteOutputTests(unittest.TestCase):
     def test_todo_in_tex_code_environment_is_not_a_placeholder(self) -> None:
         text = r"\begin{lstlisting}\n# TODO: 학생이 구현\n\end{lstlisting}"
         self.assertNotIn(("warning", "todo-review"), self.issues_for(text, ".tex"))
+
+    def test_markdown_link_examples_in_code_are_not_local_links(self) -> None:
+        text = (
+            "# Markdown 실습\n"
+            "```markdown\n[예시](missing-example.md)\n```\n"
+            "인라인 예시: `[예시](missing-inline.md)`\n"
+        )
+        report = Report()
+        validate_markdown(Path("note.md"), text, report)
+        self.assertEqual([], report.errors)
+
+    def test_actual_missing_markdown_link_is_still_an_error(self) -> None:
+        report = Report()
+        validate_markdown(Path("note.md"), "# 노트\n[자료](missing-material.md)", report)
+        self.assertEqual(["broken-link"], [issue.code for issue in report.errors])
 
 
 if __name__ == "__main__":

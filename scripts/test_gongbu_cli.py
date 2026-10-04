@@ -148,6 +148,15 @@ class SubprocessTests(unittest.TestCase):
             text = (course / ".gitignore").read_text(encoding="utf-8")
             self.assertEqual(1, text.count("/.gongbu/"))
 
+    def test_setup_help_and_invalid_options_leave_course_untouched(self) -> None:
+        for arguments, expected in ((["--help"], 0), (["--unknown"], 2)):
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as temporary:
+                course = Path(temporary)
+                result = run_gongbu("setup", *arguments, cwd=course, expected=expected)
+                self.assertEqual([], list(course.iterdir()))
+                if expected == 0:
+                    self.assertIn("usage:", result.stdout)
+
     def test_run_init_in_course_folder_keeps_state_out_of_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             # CI의 Windows TEMP는 8.3 단축 경로(RUNNER~1)라서, CLI가 돌려주는 resolve()된 경로와 맞추려면 먼저 푼다.
@@ -190,6 +199,25 @@ class SubprocessTests(unittest.TestCase):
             self.assertEqual([], second["written"])
             self.assertEqual(1, len(second["notices"]))
             self.assertEqual(1, config.count("[agents]"))
+
+    def test_setup_agents_help_and_invalid_options_do_not_install(self) -> None:
+        cases = ((["--help"], 0), (["--unknown"], 2), (["--home"], 2))
+        for arguments, expected in cases:
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as temporary:
+                home = Path(temporary) / "home"
+                result = run_gongbu("setup-agents", "--home", str(home), *arguments,
+                                    cwd=Path(temporary), expected=expected)
+                self.assertFalse(home.exists())
+                if expected == 0:
+                    self.assertIn("usage:", result.stdout)
+
+    def test_setup_agents_accepts_equals_home_option(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            result = run_gongbu("setup-agents", f"--home={home}", cwd=Path(temporary))
+            payload = json.loads(result.stdout)
+            self.assertEqual(str(home.resolve()), payload["home"])
+            self.assertTrue((home / ".codex" / "agents").is_dir())
 
 
 if __name__ == "__main__":

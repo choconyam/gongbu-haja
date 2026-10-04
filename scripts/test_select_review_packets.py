@@ -8,10 +8,23 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts import prepare_transcript_review as preparation
 from scripts import select_review_packets as selector
 
 
 class SelectReviewPacketsTests(unittest.TestCase):
+    def write_packet(self, path: Path, payload: dict[str, object], byte_count: int) -> None:
+        payload = dict(payload)
+        payload["_padding"] = ""
+        empty = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        padding = byte_count - len(empty)
+        if padding < 0:
+            raise AssertionError(f"fixture packet is larger than requested: {byte_count} < {len(empty)}")
+        payload["_padding"] = "x" * padding
+        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.assertEqual(byte_count, len(encoded))
+        path.write_bytes(encoded)
+
     def make_fixture(self, root: Path) -> Path:
         packet_dir = root / "sample_packets"
         packet_dir.mkdir()
@@ -24,7 +37,18 @@ class SelectReviewPacketsTests(unittest.TestCase):
         )
         for packet_id, reasons, target_ids, byte_count in data:
             path = packet_dir / f"{packet_id}.json"
-            path.write_bytes(b"x" * byte_count)
+            self.write_packet(
+                path,
+                {
+                    "schema_version": 1,
+                    "kind": "transcript_review_packet",
+                    "model_input": True,
+                    "packet_id": packet_id,
+                    "target_segment_ids": target_ids,
+                    "candidate_reasons": reasons,
+                },
+                byte_count,
+            )
             entries.append(
                 {
                     "packet_id": packet_id,
@@ -52,6 +76,15 @@ class SelectReviewPacketsTests(unittest.TestCase):
             encoding="utf-8",
         )
         return manifest
+
+    def rewrite_packet(self, manifest: Path, packet_id: str, mutate) -> None:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        entry = next(item for item in payload["packets"] if item["packet_id"] == packet_id)
+        path = manifest.parent / entry["path"]
+        packet = json.loads(path.read_text(encoding="utf-8"))
+        mutate(packet)
+        self.write_packet(path, packet, entry["bytes"])
+        manifest.write_text(json.dumps(payload), encoding="utf-8")
 
     def test_risk_priority_and_byte_cap_without_filters(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -95,6 +128,78 @@ class SelectReviewPacketsTests(unittest.TestCase):
                 {"packet_id", "path", "candidate_reasons", "bytes"},
                 set(result["selected"][0]),
             )
+
+    def test_unselected_invalid_packet_is_not_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.make_fixture(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            entry = next(item for item in payload["packets"] if item["packet_id"] == "packet_0001")
+            path = manifest.parent / entry["path"]
+            path.write_bytes(b"{" + b"x" * (entry["bytes"] - 2) + b"}")
+            result = selector.select_packets(manifest, max_total_bytes=1_300)
+            self.assertEqual(["packet_0002", "packet_0003"], [item["packet_id"] for item in result["selected"]])
+
+    def test_selected_packet_rejects_missing_or_false_model_input(self) -> None:
+        for mutate in (
+            lambda packet: packet.pop("model_input"),
+            lambda packet: packet.__setitem__("model_input", False),
+        ):
+            with self.subTest(mutate=mutate):
+                with tempfile.TemporaryDirectory() as temporary:
+                    manifest = self.make_fixture(Path(temporary))
+                    self.rewrite_packet(manifest, "packet_0002", mutate)
+                    with self.assertRaises(selector.SelectionError):
+                        selector.select_packets(manifest, reasons=["low_avg_logprob"])
+
+    def test_selected_packet_rejects_schema_kind_identity_and_reasons_mismatch(self) -> None:
+        mutations = (
+            lambda packet: packet.__setitem__("schema_version", 2),
+            lambda packet: packet.__setitem__("kind", "transcript_review_packets"),
+            lambda packet: packet.__setitem__("packet_id", "packet_9999"),
+            lambda packet: packet.__setitem__("target_segment_ids", ["wrong"]),
+            lambda packet: packet.__setitem__("candidate_reasons", ["wrong"]),
+        )
+        for mutate in mutations:
+            with self.subTest(mutate=mutate):
+                with tempfile.TemporaryDirectory() as temporary:
+                    manifest = self.make_fixture(Path(temporary))
+                    self.rewrite_packet(manifest, "packet_0002", mutate)
+                    with self.assertRaises(selector.SelectionError):
+                        selector.select_packets(manifest, reasons=["low_avg_logprob"])
+
+    def test_selected_packet_rejects_malformed_json_and_same_size_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.make_fixture(root)
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            entry = next(item for item in payload["packets"] if item["packet_id"] == "packet_0002")
+            path = manifest.parent / entry["path"]
+            path.write_bytes(b"{" + b"x" * (entry["bytes"] - 2) + b"}")
+            self.assertEqual(entry["bytes"], path.stat().st_size)
+            with self.assertRaises(selector.SelectionError):
+                selector.select_packets(manifest, reasons=["low_avg_logprob"])
+
+    def test_generated_packet_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            handout = root / "handout.txt"
+            handout.write_text("공진 주파수\n공진 주파수\n", encoding="utf-8")
+            segments = root / "segments.json"
+            segments.write_text(
+                json.dumps(
+                    {"segments": [{"start": 0, "end": 1, "text": "공진 주파수", "avg_logprob": -2}]},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            result = preparation.run(
+                preparation.build_parser().parse_args(
+                    ["--handout", str(handout), "--segments", str(segments), "--output-dir", str(root / "out")]
+                )
+            )
+            selected = selector.select_packets(Path(result["review_packet_manifest"]))
+            self.assertEqual(1, selected["selected_count"])
 
 
 if __name__ == "__main__":

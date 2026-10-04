@@ -120,12 +120,18 @@ def validate_decisions(
         verification = raw.get("verification", "unverified")
         if verification not in VALID_VERIFICATION:
             raise CorrectionError(f"구간 {identifier!r}의 verification 값이 잘못됐습니다: {verification}")
+        if action == "replace" and verification == "unverified":
+            raise CorrectionError(
+                f"구간 {identifier!r}의 replace 결정에는 audio, handout, context 또는 multiple 확인이 필요합니다."
+            )
         rationale = raw.get("rationale")
         if not isinstance(rationale, str) or not rationale.strip():
             raise CorrectionError(f"구간 {identifier!r}에 rationale이 필요합니다.")
 
         normalized = dict(raw)
         normalized["rationale"] = rationale.strip()
+        # keep/unresolved에서 생략된 확인 상태도 감사 로그에서는 명시한다.
+        normalized["verification"] = verification
         if action == "replace":
             replacement = raw.get("replacement")
             if not isinstance(replacement, str) or not replacement.strip():

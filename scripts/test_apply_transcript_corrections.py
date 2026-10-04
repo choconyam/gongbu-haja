@@ -140,6 +140,48 @@ class ApplyTranscriptCorrectionsTests(unittest.TestCase):
             reviewed = json.loads(Path(result["segments_reviewed"]).read_text(encoding="utf-8"))
             self.assertEqual("공진 주파수가 십이 헤르츠다", reviewed["segments"][0]["text"])
             self.assertEqual([1], reviewed["review"]["unresolved_segment_ids"])
+            audit = json.loads(Path(result["correction_audit"]).read_text(encoding="utf-8"))
+            self.assertEqual("unverified", audit["decisions"][0]["verification"])
+
+    def test_rejects_unverified_or_missing_verification_for_replacement(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.make_source(root)
+            original_bytes = source.read_bytes()
+            for verification in ("unverified", None):
+                decision = {
+                    "segment_id": 1,
+                    "original": "공진 주파수가 십이 헤르츠다",
+                    "action": "replace",
+                    "replacement": "근거 없는 교체",
+                    "rationale": "확인하지 않음",
+                }
+                if verification is not None:
+                    decision["verification"] = verification
+                decisions = self.write_decisions(root, source, [decision])
+                output = root / f"out_{verification}"
+                with self.assertRaises(atc.CorrectionError):
+                    atc.apply_corrections(source, decisions, output, "week1")
+                self.assertFalse(output.exists())
+                self.assertEqual(original_bytes, source.read_bytes())
+
+    def test_verified_replacement_preserves_each_supported_evidence_type(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.make_source(root)
+            for verification in ("audio", "handout", "context", "multiple"):
+                with self.subTest(verification=verification):
+                    decisions = self.write_decisions(root, source, [{
+                        "segment_id": 1,
+                        "original": "공진 주파수가 십이 헤르츠다",
+                        "action": "replace",
+                        "replacement": "공진 주파수가 12Hz다",
+                        "verification": verification,
+                        "rationale": "해당 근거로 표현을 확인함",
+                    }])
+                    result = atc.apply_corrections(source, decisions, root / verification, "week1")
+                    reviewed = json.loads(Path(result["segments_reviewed"]).read_text(encoding="utf-8"))
+                    self.assertEqual("공진 주파수가 12Hz다", reviewed["segments"][0]["text"])
 
     def test_does_not_overwrite_existing_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

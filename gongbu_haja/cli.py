@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import runpy
 import sys
@@ -182,7 +183,15 @@ def _ensure_gitignore(course: Path) -> list[str]:
     return missing
 
 
-def command_setup(course: Path) -> int:
+def command_setup(course: Path, rest: Sequence[str] = ()) -> int:
+    parser = argparse.ArgumentParser(
+        prog="gongbu setup",
+        description="현재 과목 폴더에 실행 상태·출력 폴더와 .gitignore를 준비합니다.",
+    )
+    try:
+        parser.parse_args(rest)
+    except SystemExit as exc:
+        return _exit_code(exc.code)
     created = []
     for directory in (state_root(course), output_root(course)):
         if not directory.exists():
@@ -207,14 +216,16 @@ def command_setup(course: Path) -> int:
 
 
 def command_setup_agents(engine: Path, rest: Sequence[str]) -> int:
-    home = Path.home()
-    arguments = list(rest)
-    if has_option(arguments, "--home"):
-        index = arguments.index("--home")
-        if index + 1 >= len(arguments):
-            print("[오류] --home 뒤에 경로가 필요합니다.", file=sys.stderr)
-            return 2
-        home = Path(arguments[index + 1]).expanduser().resolve()
+    parser = argparse.ArgumentParser(
+        prog="gongbu setup-agents",
+        description="사용자 범위에 관리형 실행용 서브 에이전트 선언을 설치합니다.",
+    )
+    parser.add_argument("--home", type=Path, default=Path.home(), help="설치할 사용자 홈 폴더")
+    try:
+        args = parser.parse_args(rest)
+    except SystemExit as exc:
+        return _exit_code(exc.code)
+    home = args.home.expanduser().resolve()
     scripts_dir = engine / "scripts"
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
@@ -248,7 +259,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     course = course_root()
     if command == "setup":
-        return command_setup(course)
+        return command_setup(course, rest)
 
     try:
         engine = engine_root()

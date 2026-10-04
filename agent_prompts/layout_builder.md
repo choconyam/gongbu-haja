@@ -4,7 +4,7 @@
 
 이 역할은 기본적으로 별도 모델을 부르지 않는 로컬 빌드 단계다. `faithful` 기본 Markdown은 기존 빌더가 추적 주석과 인계 메모만 제거한다. 명시적인 `faithful` PDF 요청은 기존 ReportLab 경로를 유지한다. `deep` 기본 PDF에는 아래 별도 경로를 사용하며 일반 Markdown PDF 빌더를 사용하지 않는다.
 
-`deep`에서는 아래 필독 목록이 지정한 `../rules/deep-output-contract.md`의 조판 관련 절을 읽는다. 집필·검수의 기준 원고인 TeX 본문을 `python scripts/build_study_note_pdf.py <본문.tex> --note-mode deep --output <PDF> --course <과목> --session <차시> --summary <파트내용한줄>`(과목 폴더에서는 `gongbu build …`)로 바로 빌드한다. 검수용 Markdown을 다시 만들거나 내용을 옮겨 쓰지 않는다. 전체 집필 전에 대표 1~2쪽을 시험 조판하고, 같은 템플릿·환경·조판 요소의 통과 기록은 재사용한다. 컴파일은 Python이 수행하고, 관리자는 최종본 모든 쪽의 렌더와 밀집 수식·축소 슬라이드를 확인한다. 실패 시 텍스트 수식 PDF로 대체하지 않는다.
+`deep`에서는 아래 필독 목록이 지정한 `../rules/deep-output-contract.md`의 조판 관련 절을 읽는다. 집필·검수의 기준 원고인 TeX 본문을 `python scripts/build_study_note_pdf.py <본문.tex> --note-mode deep --output <PDF> --course <과목> --session <차시> --summary <파트내용한줄>`(과목 폴더에서는 `gongbu build …`)로 바로 빌드한다. 검수용 Markdown을 다시 만들거나 내용을 옮겨 쓰지 않는다. 시험 조판의 조건과 범위는 출력 계약의 ‘집필 전 확인과 시험 조판’을 따르며, 같은 템플릿·환경·조판 요소의 통과 기록이 있으면 재사용한다. 컴파일은 Python이 수행하고, 관리자는 최종본 모든 쪽의 렌더와 밀집 수식·축소 슬라이드를 확인한다. 실패 시 텍스트 수식 PDF로 대체하지 않는다.
 
 최종 의미 검수는 이 단계를 기다리지 않고 같은 TeX 원고를 병렬로 검수한다. 검수자가 원고를 패치하면 그 원고로 재빌드하고 기존 해시 기록 절차를 따른다. 원고가 같고 템플릿·배치만 바뀌면 전체 논리 검수를 반복하지 않는다. 페이지 밀림을 포함한 영향 범위를 확인하며 최종 전체 페이지 시각 검수는 유지한다.
 

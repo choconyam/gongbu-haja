@@ -98,7 +98,7 @@ def read_text(path: Path, report: Report) -> str | None:
 
 
 def blank_protected_region(match: re.Match[str]) -> str:
-    """코드 영역의 줄 수는 유지하면서 placeholder 검사 대상에서만 숨긴다."""
+    """코드 영역의 줄 수는 유지하면서 본문 검사 대상에서 숨긴다."""
 
     return "".join("\n" if character == "\n" else " " for character in match.group(0))
 
@@ -169,7 +169,8 @@ def validate_markdown(path: Path, text: str, report: Report) -> None:
         report.add("error", "missing-heading", "Markdown 제목이 없습니다.", path)
     if text.count("```") % 2:
         report.add("error", "unclosed-code-fence", "닫히지 않은 코드 블록이 있습니다.", path)
-    for match in MARKDOWN_LINK_RE.finditer(text):
+    link_text = text_for_placeholder_scan(text, path)
+    for match in MARKDOWN_LINK_RE.finditer(link_text):
         raw = match.group(1)
         link = normalize_link(raw)
         if link is None:

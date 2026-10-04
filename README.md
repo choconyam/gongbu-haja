@@ -143,7 +143,7 @@ flowchart LR
 | [관리형 에이전트 실행](docs/managed-run.md) | `manage_run.py` 명령 전체, 검수 반려 처리, 진도별 제작과 이어 쓰기, 여러 강의 병렬 처리 |
 | [구조와 동작 원리](docs/architecture.md) | 내부 실행 흐름, 에이전트/Python 분업, 토큰 절약, DEEP PDF 출력, 역할 ↔ 실행 프로필 ↔ 모델 대응표, 폴더 구조 |
 | [개발과 검증](docs/development.md) | 업데이트 개발 시 검증 범위, 전사 패키지·최종 노트 검증 |
-| [패치노트](CHANGELOG.md) | 최신 `v1.7.3`과 버전별 변경 사항, Before/After |
+| [패치노트](CHANGELOG.md) | 최신 `v1.7.3`과 버전별 변경 사항, 실제 변경 예시 |
 
 ## 주의: 강의 자료의 권리
 
