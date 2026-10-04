@@ -1,0 +1,6 @@
+#!/bin/sh
+# 올리려는 모든 커밋에 비밀값·인증 파일·개인 강의 자료가 있으면 푸시를 멈춘다.
+# 커밋 훅을 건너뛰고 만든 커밋도 여기서 한 번 더 걸러진다.
+root=$(git rev-parse --show-toplevel) || exit 1
+command -v python >/dev/null 2>&1 && exec python "$root/scripts/check_secrets.py" --pre-push
+exec python3 "$root/scripts/check_secrets.py" --pre-push

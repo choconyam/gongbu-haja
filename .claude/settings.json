@@ -1,0 +1,63 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(.env)",
+      "Read(.env.*)",
+      "Read(!.env.example)",
+      "Read(*.env)",
+      "Read(.envrc)",
+      "Read(*.pem)",
+      "Read(*.key)",
+      "Read(*.p12)",
+      "Read(*.pfx)",
+      "Read(id_rsa)",
+      "Read(id_dsa)",
+      "Read(id_ecdsa)",
+      "Read(id_ed25519)",
+      "Read(cookies*.json)",
+      "Read(storage-state*.json)",
+      "Read(credentials.json)",
+      "Read(.netrc)",
+      "Read(.git-credentials)",
+      "Read(.pypirc)",
+      "Read(.npmrc)",
+      "Read(browser-profile/**)",
+      "Read(.auth/**)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.kube/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.codex/auth.json)",
+      "Read(~/.git-credentials)",
+      "Read(~/.netrc)",
+      "Read(~/.bash_history)",
+      "Read(~/.zsh_history)",
+      "Read(~/AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine/**)"
+    ],
+    "ask": [
+      "Edit(/.claude/settings.json)",
+      "Edit(/.claude/settings.local.json)",
+      "Edit(/.githooks/**)",
+      "Edit(/scripts/check_secrets.py)",
+      "Edit(/scripts/guard_secrets.py)",
+      "Edit(~/.claude/settings.json)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Read|Edit|Write|MultiEdit|NotebookEdit|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v python >/dev/null 2>&1 && exec python \"${CLAUDE_PROJECT_DIR}/scripts/guard_secrets.py\"; exec python3 \"${CLAUDE_PROJECT_DIR}/scripts/guard_secrets.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

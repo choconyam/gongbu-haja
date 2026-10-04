@@ -1,0 +1,6 @@
+#!/bin/sh
+# 커밋하려는 파일에 비밀값·인증 파일·개인 강의 자료가 있으면 커밋을 멈춘다.
+# 켜기: git config core.hooksPath .githooks (docs/development.md의 비밀값 보호 참고)
+root=$(git rev-parse --show-toplevel) || exit 1
+command -v python >/dev/null 2>&1 && exec python "$root/scripts/check_secrets.py"
+exec python3 "$root/scripts/check_secrets.py"

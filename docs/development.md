@@ -8,6 +8,19 @@
 
 전체 단위 테스트와 Windows·Linux/Python 버전별 설치 호환성 검사는 기존 [GitHub Actions](../.github/workflows/validate.yml)가 push와 pull request마다 실행한다. 테스트는 Python 작업이며 AI 모델을 호출하지 않는다. 로컬 검증과 CI 결과는 구분해서 보고하고, CI 실패는 해당 실패 범위부터 확인한다.
 
+## 비밀값 보호
+
+저장소를 처음 받았다면 커밋 훅을 한 번 켠다.
+
+```bash
+git config core.hooksPath .githooks
+```
+
+- **커밋·푸시 검사:** `pre-commit`은 커밋하려는 파일을, `pre-push`는 올리려는 모든 커밋을 [`check_secrets.py`](../scripts/check_secrets.py)로 검사한다. API 키·토큰 모양의 값, 비밀값 이름의 변수에 실제 값처럼 보이는 문자열을 넣은 줄, 환경 파일·인증서·쿠키 같은 인증 파일, 강의 자료·녹음·실행 상태 폴더가 있으면 멈추고, 위치와 종류만 값을 가린 채 알린다. 커밋 훅을 건너뛴 커밋도 푸시 단계에서 다시 걸러지고, CI가 `--all`로 저장소 전체를 한 번 더 검사한다. GitHub의 비밀값 푸시 보호도 켜져 있다.
+- **Claude Code 실행 전 검사:** [`.claude/settings.json`](../.claude/settings.json)이 셸·파일 도구를 쓰기 직전마다 [`guard_secrets.py`](../scripts/guard_secrets.py)를 실행한다. 인증 파일 읽기, 환경 변수 전체 출력, 비밀값 변수·OS 자격 증명 보관소 접근, 명령이나 파일 내용에 든 토큰 모양의 값, `--no-verify`·`core.hooksPath` 변경 같은 검사 우회를 막는다. 커밋 훅·검사기·Claude 설정을 고치려 하면 사용자 확인을 받는다. 커밋 메시지에 비밀값 변수 이름이 들어가야 하면 메시지를 파일로 만들어 `git commit -F <파일>`로 넘긴다.
+- 흔한 실수와 우회를 막는 장치이지 완전한 격리는 아니다. 키가 한 번이라도 공개 저장소·채팅·로그에 나갔다면 그 서비스에서 바로 재발급한다.
+- 오탐이면 검사를 끄지 말고 값을 `<토큰>` 같은 자리표시자로 바꾼다. 테스트용 가짜 토큰은 문자열을 실행 중에 조립한다.
+
 ## 학습노트 산출물 검증
 
 전사 패키지:

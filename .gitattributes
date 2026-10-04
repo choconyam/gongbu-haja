@@ -11,3 +11,6 @@
 *.yml text eol=lf
 *.txt text eol=lf
 *.toml text eol=lf
+
+# Git 훅은 sh로 실행되므로 CRLF가 섞이면 동작하지 않는다.
+.githooks/* text eol=lf
