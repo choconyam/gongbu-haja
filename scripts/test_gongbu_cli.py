@@ -40,6 +40,16 @@ def run_gongbu(*arguments: str, cwd: Path, expected: int = 0, env: dict[str, str
     return result
 
 
+class HelpOutputTests(unittest.TestCase):
+    def test_help_survives_a_pipe_without_utf8_environment(self) -> None:
+        # Windows 기본 코드페이지(cp949)로 파이프에 쓸 때 도움말의 기호 때문에 죽지 않는다.
+        env = cli_env()
+        env.pop("PYTHONIOENCODING", None)
+        env.pop("PYTHONUTF8", None)
+        result = run_gongbu("--help", cwd=REPO_ROOT, env=env)
+        self.assertIn("과목 폴더", result.stdout)
+
+
 class EngineLocationTests(unittest.TestCase):
     def test_repo_checkout_is_used_when_no_bundled_engine(self) -> None:
         engine = paths.engine_root(environ={})

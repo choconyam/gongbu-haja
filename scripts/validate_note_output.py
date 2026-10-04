@@ -196,16 +196,25 @@ def candidate_tex_paths(base: Path, raw: str, kind: str) -> list[Path]:
 
 
 def validate_tex(path: Path, text: str, report: Report) -> None:
-    for required in (r"\documentclass", r"\begin{document}", r"\end{document}"):
-        if required not in text:
-            report.add("error", "missing-tex-structure", f"필수 TeX 구문이 없습니다: {required}", path)
+    structure = (r"\documentclass", r"\begin{document}", r"\end{document}")
+    present = [required for required in structure if required in text]
+    # 관리형 DEEP의 기준 원고는 서문 없는 본문 조각이다. 문서 구조가 하나도 없으면 조각으로 보고,
+    # 일부만 있으면 깨진 문서로 본다.
+    report.metrics["tex_kind"] = "document" if present else "fragment"
+    if present:
+        for required in structure:
+            if required not in present:
+                report.add("error", "missing-tex-structure", f"필수 TeX 구문이 없습니다: {required}", path)
     balance = tex_brace_balance(text)
     report.metrics["brace_balance"] = balance
     if balance:
         report.add("error", "unbalanced-braces", f"중괄호 균형이 맞지 않습니다: {balance:+d}", path)
     for match in TEX_INCLUDE_RE.finditer(text):
         kind = match.group("kind")
-        raw = match.group("path")
+        raw = match.group("path").strip()
+        # 공백 있는 경로를 감싼 따옴표(\input{"…"})는 파일 이름이 아니다.
+        if len(raw) >= 2 and raw[0] == raw[-1] == '"':
+            raw = raw[1:-1]
         if any(token in raw for token in ("#", "\\", "{")):
             continue
         candidates = candidate_tex_paths(path.parent, raw, kind)

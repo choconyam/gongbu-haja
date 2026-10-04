@@ -254,7 +254,14 @@ def apply_corrections(
         json.dumps(reviewed_payload, ensure_ascii=False, indent=2) + "\n",
         force,
     )
-    atomic_write_text(markdown_path, render_reviewed_markdown(lecture_id, reviewed_segments), force)
+    # 구간 JSON의 원문은 그대로 두고, 노트 작성용 Markdown에서만 미해결 구간을 표시한다.
+    unresolved_keys = {segment_key(identifier) for identifier in unresolved}
+    display_segments = [
+        {**segment, "text": f"{str(segment.get('text', '')).strip()} [전사 불명확]"}
+        if segment_key(segment.get("id", index + 1)) in unresolved_keys else segment
+        for index, segment in enumerate(reviewed_segments)
+    ]
+    atomic_write_text(markdown_path, render_reviewed_markdown(lecture_id, display_segments), force)
     atomic_write_text(
         audit_path,
         json.dumps(audit_payload, ensure_ascii=False, indent=2) + "\n",

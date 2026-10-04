@@ -7,6 +7,8 @@ from typing import Any
 
 
 COORDINATES = {"pages": "page", "lines": "line", "segments": "segment_index"}
+# Markdown 부분 원고를 이어 붙일 때 넣는 경계. 학생용 빌드는 경계마다 그 부분의 인계 메모만 지운다.
+MARKDOWN_PART_BOUNDARY = "<!-- gongbu:part -->"
 
 
 def validate_scope(scope: Any) -> dict[str, Any]:
@@ -113,6 +115,11 @@ def validate_map_scope(payload: dict[str, Any], scope: dict[str, Any] | None) ->
             cursor = max(cursor, high + 1)
         if cursor != end + 1:
             raise ValueError(f"진도 끝까지 자료가 대응되지 않았습니다: {source['path']}")
+
+
+def markdown_composition(texts: list[str]) -> str:
+    """승인된 Markdown 부분 원고를 내용 그대로 잇고, 부분 사이에 경계만 넣는다."""
+    return f"\n\n{MARKDOWN_PART_BOUNDARY}\n\n".join(text.rstrip() for text in texts) + "\n"
 
 
 def tex_part_input(path: Path) -> str:

@@ -4,7 +4,7 @@
 
 ## 관리형 에이전트 실행
 
-아래 명령은 기존 실행 상태를 이어가거나 사용자가 관리형 실행을 요청했을 때만 사용한다. 새 직접 제작에는 `init`이나 역할별 `start/complete`가 필요 없다. 명령은 개발하거나 관리형 문제를 확인할 때 참고용이다.
+아래 명령은 기존 실행 상태를 이어가거나 사용자가 관리형 실행을 요청했을 때만 사용한다. 새 직접 제작에는 `init`이나 역할별 `start/complete`가 필요 없다. 명령은 개발하거나 관리형 문제를 확인할 때 참고용이다. 관리형 실행은 런타임 모델표가 있는 Codex와 Claude Code에서만 쓴다. Cursor 같은 다른 도구에서는 직접 제작을 쓴다.
 
 입력 폴더를 준비한 뒤 강의별 상태 파일을 만든다.
 
@@ -28,7 +28,9 @@ python scripts/manage_run.py start workspace/<강의ID>/run_state.json --role so
 python scripts/manage_run.py complete workspace/<강의ID>/run_state.json --role source_mapper --artifact work/source_map.json
 ```
 
-역할이 실패하면 전체 입력으로 다시 시작할 수 없다. 실패한 위치를 지정한 국소 재검수 한 번만 허용한다. 최종 검수가 내용 결함을 반려했을 때는 검수가 직접 고친 파일을 `complete --patched`로 다시 기록하거나, `repair --reopen writer`로 집필 이후를 다시 열어 새 review cycle에서 한 번 더 검수한다.
+역할이 실패하면 전체 입력으로 다시 시작할 수 없다. 실패한 위치를 지정한 국소 재검수 한 번만 허용한다. 최종 검수가 내용 결함을 반려했을 때는 검수가 고친 원고로 먼저 다시 빌드한 뒤 원고와 새 출력을 `complete --patched`로 함께 기록하거나, `repair --reopen writer`로 집필 이후를 다시 열어 새 review cycle에서 한 번 더 검수한다.
+
+아래 국소 재검수(`--repair-packet`)와 다음의 `escalate --role transcript_auditor` 예시는 `semantic` 전처리(새 deep 실행)에서만 동작한다. 새 faithful 실행은 `transcript_auditor`·`source_mapper`가 Python 전용이라 모델 패킷을 받지 않는다.
 
 ```powershell
 python scripts/manage_run.py fail workspace/<강의ID>/run_state.json `
@@ -99,7 +101,7 @@ python scripts/manage_run.py init <과목폴더> --lecture-id L01_part01 --note-
 python scripts/prepare_source_map.py workspace/L01_part01/run_state.json --output-dir workspace/L01_part01/sources
 python scripts/manage_run.py init <과목폴더> --lecture-id L01_part02 --note-mode deep --scope <새범위.json> `
   --continue-from workspace/L01_part01/run_state.json
-python scripts/manage_run.py compose workspace/L01_part02/run_state.json --output <누적_원고.md>
+python scripts/manage_run.py compose workspace/L01_part02/run_state.json --output <누적_원고.tex>
 ```
 
 `prepare_source_map.py`(CLI 설치본에서는 `gongbu prepare-sources`)는 모델을 부르지 않고 대상 범위의 원문·페이지·구간·해시를 무손실 근거 묶음으로 만든다. 요약·용어 교정·중요도 판정은 하지 않는다. `compose`는 검수가 끝난 진도별 원고를 모델 호출 없이 누적 원고로 잇는다. 범위 JSON 형식과 경계 규칙은 [진도별 제작 규칙](../rules/incremental-notes.md), 자료 충실형 관리형 경로의 전처리 순서는 [자료 충실형 경로](../rules/faithful-cost-path.md)에 있다.

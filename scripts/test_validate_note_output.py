@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.validate_note_output import Report, check_common_text, validate_markdown
+from scripts.validate_note_output import Report, check_common_text, validate_markdown, validate_tex
 
 
 class ValidateNoteOutputTests(unittest.TestCase):
@@ -50,6 +51,31 @@ class ValidateNoteOutputTests(unittest.TestCase):
         report = Report()
         validate_markdown(Path("note.md"), "# 노트\n[자료](missing-material.md)", report)
         self.assertEqual(["broken-link"], [issue.code for issue in report.errors])
+
+    def test_quoted_tex_input_path_is_found(self) -> None:
+        # DEEP 직접 제작 문서는 공백 있는 엔진 경로를 \input{"…"}로 감싸 부른다.
+        with tempfile.TemporaryDirectory(prefix="엔진 경로 ") as temporary:
+            style = Path(temporary).resolve() / "deep_note_style.tex"
+            style.write_text("% style", encoding="utf-8")
+            text = ("\\documentclass[a4paper,11pt]{article}\n"
+                    f'\\input{{"{style.as_posix()}"}}\n'
+                    "\\begin{document}\n본문\n\\end{document}\n")
+            report = Report()
+            validate_tex(Path(temporary) / "note.tex", text, report)
+            self.assertEqual([], report.errors)
+            report = Report()
+            validate_tex(Path(temporary) / "note.tex", text.replace("deep_note_style", "missing_style"), report)
+            self.assertEqual(["missing-tex-asset"], [issue.code for issue in report.errors])
+
+    def test_tex_body_fragment_is_not_a_broken_document(self) -> None:
+        report = Report()
+        validate_tex(Path("body.tex"), "\\section{행렬}\n본문 $a_{ij}$.\n", report)
+        self.assertEqual([], report.errors)
+        self.assertEqual("fragment", report.metrics["tex_kind"])
+        # 구조가 일부만 있으면 깨진 문서다.
+        report = Report()
+        validate_tex(Path("note.tex"), "\\begin{document}\n본문\n\\end{document}\n", report)
+        self.assertEqual(["missing-tex-structure"], [issue.code for issue in report.errors])
 
 
 if __name__ == "__main__":

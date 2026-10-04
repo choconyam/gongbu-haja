@@ -83,13 +83,13 @@ Python 통과는 내용이 좋다는 뜻이 아니다. 자동 검사는 기계�
 
 ### DEEP PDF 출력
 
-`deep`은 원본 슬라이드 바로 아래에 쉬운 설명과 필요한 중간 유도를 배치한다. 수식은 교과서식으로 조판하고, 자동 목차·장식 박스·머리말·꼬리말·요청하지 않은 문제나 요약 부록은 넣지 않는다. 최종 전달 전에 원고와 TeX의 내용 동등성 및 PDF 모든 쪽의 가독성을 확인한다. 세부 기준은 [DEEP 출력 계약](../rules/deep-output-contract.md)에 있다.
+`deep`은 원본 슬라이드 바로 아래에 쉬운 설명과 필요한 중간 유도를 배치한다. 수식은 교과서식으로 조판하고, 자동 목차·요청하지 않은 문제나 요약 부록은 넣지 않는다. 원본 슬라이드는 얇은 테두리와 `원본 PDF p.N` 캡션으로 노트와 구분하고, 같은 배율(0.74)로 줄여 한 쪽에 더 많은 내용을 담는다. 머리말·쪽 번호·강조 상자·표지는 `scripts/deep_note_style.tex` 한 파일이 정하며, 관리형 빌드와 직접 제작 문서가 모두 이 파일을 불러온다. 최종 전달 전에 TeX 원고와 PDF의 대응 및 PDF 모든 쪽의 가독성을 확인한다. 세부 기준은 [DEEP 출력 계약](../rules/deep-output-contract.md)에 있다.
 
 ```powershell
 python scripts/build_study_note_pdf.py <본문.tex> --note-mode deep --output <노트.pdf> --course <과목> --session <차시> --summary <파트내용한줄>
 ```
 
-CLI 설치본에서는 `gongbu build`로 같은 빌더를 호출할 수 있다. TeX 본문은 사전에 준비해야 한다. XeLaTeX, `fontspec`, `xetexko`, `amsmath`, `amssymb`, `graphicx`, `geometry`와 한글 글꼴이 필요하며 빌더는 이를 자동 설치하지 않는다. Python PDF 도구 설치만으로 TeX 환경까지 준비되지는 않는다. 환경이 없거나 수식·글꼴 오류가 나면 빌드를 중단하고 기존 PDF를 보존한다.
+CLI 설치본에서는 `gongbu build`로 같은 빌더를 호출할 수 있다. TeX 본문은 사전에 준비해야 한다. XeLaTeX와 한글 글꼴, 스타일이 쓰는 패키지(`fontspec`, `kotex`, `amsmath`, `amssymb`, `graphicx`, `geometry`, `xcolor`, `titlesec`, `fancyhdr`, `tcolorbox`, `booktabs`, `tabularx`, `needspace`, `etoolbox`, `hyperref`)가 필요하며 빌더는 이를 자동 설치하지 않는다. Noto 가변 글꼴은 `GONGBU_FONT_DIR`, Windows 글꼴 폴더, 사용자 글꼴 폴더 순서로 찾고, 없으면 바탕·맑은 고딕 같은 기본 글꼴로 대체한 뒤 안내를 출력한다. Python PDF 도구 설치만으로 TeX 환경까지 준비되지는 않는다. 환경이 없거나 수식·글꼴 오류가 나면 빌드를 중단하고 기존 PDF를 보존한다.
 
 `faithful`의 기본 출력은 Markdown이며, PDF를 명시하면 기존 빌더를 사용한다. 기본 형식으로 시작한 실행은 `set-mode` 때 새 모드의 기본 형식을 따르고, 사용자가 지정한 형식은 유지한다.
 
@@ -193,7 +193,7 @@ flowchart LR
 → 조판·구조·최종 출력 확인
 ```
 
-기존 전사본이 있으면 새로 전사하지 않고 원본을 보존한 뒤 음성 검수 상태를 구분한다. 녹음이 없으면 `transcript_only`, 일부만 들었으면 `partially_audio_verified`, 정책상 필요한 구간을 확인했으면 `audio_verified`로 기록한다.
+기존 전사본이 있으면 새로 전사하지 않고 원본을 보존한 뒤 음성 검수 상태를 구분한다. 녹음이 없으면 `transcript_only`, 원음 없이 교안·문맥으로만 확인했으면 `reviewed`, 일부 구간을 실제로 들었으면 `partially_audio_verified`, 녹음 전체를 대조했을 때만 `audio_verified`로 기록한다.
 
 ## 폴더 구조
 
@@ -235,7 +235,8 @@ gongbu-haja/
 │  ├─ note_scope.py            수업 진도 범위와 source map 대응 검증
 │  ├─ build_study_note_pdf.py  Markdown 출력·faithful PDF·deep TeX 빌드 진입점
 │  ├─ build_deep_pdf.py        deep 전용 XeLaTeX 컴파일·글꼴/넘침 검사
-│  ├─ deep_note_template.tex   최소 디자인·교과서 수식용 TeX 템플릿
+│  ├─ deep_note_template.tex   deep 빌더용 TeX 템플릿(자리표시자만)
+│  ├─ deep_note_style.tex      deep 디자인 단일 원본: 글꼴·표지·머리말·슬라이드·상자·간격
 │  ├─ execution_profiles.py   공통 실행 프로필·런타임별 모델표
 │  ├─ sync_runtime_agents.py  모델표에서 런타임별 선언 생성
 │  ├─ project_types.py         녹음·녹화 형식 단일 정의

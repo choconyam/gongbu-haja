@@ -2,7 +2,7 @@
 
 ## DEEP mode precedence
 
-For `deep`, read and apply `deep-output-contract.md` before the profiles below. Its default is a final PDF with textbook-quality math, original slides followed immediately by easy explanations, and a minimal cover. Do not automatically add contents, synthesis, quizzes, answer appendices, callout boxes, banners, captions, headers, or footers. The profiles and optional features below do not override that contract. Keep `faithful` Markdown defaults unchanged.
+For `deep`, read and apply `deep-output-contract.md` before the profiles below. Its default is a final PDF with textbook-quality math, original slides followed immediately by easy explanations, and the fixed design in `../scripts/deep_note_style.tex`: cover, running header, page numbers, `원본 PDF p.N` slide captions, and key/warning/remember boxes only where needed. Do not automatically add contents, synthesis, quizzes, answer appendices, or decoration beyond that design. The profiles and optional features below do not override that contract. Keep `faithful` Markdown defaults unchanged.
 
 Choose the lightest format that satisfies the user's purpose. A note meant for quick editing does not need a typeset PDF; a printable study handout should not stop at raw Markdown.
 
@@ -94,10 +94,12 @@ Use this only when page-level traceability is part of the goal.
 
 When a lecture slide PDF and instructor explanation are both available, use this student-facing order unless the user asks for a concept-consolidated note:
 
-1. place one original slide page image at the top of the note page;
+1. place one original slide page image;
 2. put the explanation for that slide immediately below it;
 3. continue overflow explanation before showing the next slide;
 4. then repeat with the next original slide page.
+
+Slides follow one another continuously. Start a new page only when the next slide and the first lines of its explanation do not fit; do not force one slide per page.
 
 Keep administrative slides brief, but include every original page when the user asks to retain the handout. Do not print internal traceability strings such as `(PDF 15쪽; 강의 00:19:58-00:20:46)` in the student-facing artifact unless explicitly requested. Page and timestamp mappings remain in the internal source map.
 

@@ -16,7 +16,7 @@ AI 에이전트를 써 본 적이 없어도 된다. 아래 순서대로 하면 �
 | Python 3.10 이상 | 입력 해시·실행 상태·산출물 검증에 필요. 녹음 전사를 사용할 때는 전사 패키지도 추가로 설치한다. [python.org](https://www.python.org/downloads/)에서 설치 |
 | Windows 시스템 오디오 녹음(선택) | 온라인 강의를 이 PC에서 직접 녹음할 때만 `requirements-recording.txt`를 설치한다. 대면 수업·마이크 녹음 용도가 아니다. |
 | deep PDF 출력(선택) | XeLaTeX·한글 글꼴과 TeX 패키지가 필요하다. [DEEP PDF 출력](architecture.md#deep-pdf-출력) 참고. Markdown만 만들 때는 필요 없다. |
-| GPU | 없어도 된다. 전사가 느려질 뿐이다(1시간 강의 ≈ 20~40분) |
+| GPU | 없어도 된다. 다만 작은 모델로 CPU에서 전사해 느리고(1시간 강의 ≈ 20~40분) 정확도도 조금 낮다 |
 
 ### 1. 프로젝트 받기 (기본 설치)
 
@@ -115,7 +115,7 @@ C:\강의\과목A\                              ← 과목 폴더 (여기서 gon
 cd C:\강의\과목A
 gongbu setup                                        # .gongbu/, output/, .gitignore(녹음·상태 제외) 준비
 gongbu record --lecture-id 2026-03-10_1주차          # 온라인 강의 녹음 (Windows) → 2026-03-10_1주차\ 아래 WAV
-gongbu transcribe 2026-03-10_1주차\녹음.wav          # 로컬 전사 → .gongbu\2026-03-10_1주차\transcript\
+gongbu transcribe 2026-03-10_1주차\2026-03-10_1주차_20260310_090000.wav   # 녹음의 강의 ID로 → .gongbu\2026-03-10_1주차\transcript\
 ```
 
 이후 AI 코딩 도구(Codex, Claude Code, Cursor)에서 그 과목 폴더를 열고 "2026-03-10_1주차 자료로 자료 충실형 학습노트 만들어줘"라고 요청하면 된다. 스킬은 `gongbu paths`로 엔진 위치를 찾는다. 직접 제작은 별도 실행 상태가 필요 없고, 기존 상태를 이어가거나 관리형 실행을 요청했을 때만 `.gongbu/`의 상태와 `gongbu run ...`을 사용한다. 전체 명령은 `gongbu --help`에서 볼 수 있다.

@@ -5,7 +5,7 @@
     "name": "choconyam",
     "url": "https://github.com/choconyam"
   },
-  "description": "gongbu-haja — 강의 자료를 밀도 있는 학습노트로 바꾸는 다중 에이전트 파이프라인 설치.",
+  "description": "gongbu-haja — 강의 자료를 밀도 있는 학습노트로 바꾸는 에이전트 지침과 로컬 도구 설치.",
   "plugins": [
     {
       "name": "gongbu-haja",

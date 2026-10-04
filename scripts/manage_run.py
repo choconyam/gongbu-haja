@@ -22,7 +22,14 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from .note_scope import check_extension, scoped_inventory, tex_part_input, validate_map_scope, validate_scope
+    from .note_scope import (
+        check_extension,
+        markdown_composition,
+        scoped_inventory,
+        tex_part_input,
+        validate_map_scope,
+        validate_scope,
+    )
     from .execution_profiles import (
         EXECUTION_PROFILES,
         RUNTIMES,
@@ -34,7 +41,14 @@ try:
     from .project_types import AUDIO_SUFFIXES
     from .validate_source_coverage import CoverageValidationError, validate_coverage
 except ImportError:  # `python scripts/manage_run.py`로 직접 실행할 때
-    from note_scope import check_extension, scoped_inventory, tex_part_input, validate_map_scope, validate_scope
+    from note_scope import (
+        check_extension,
+        markdown_composition,
+        scoped_inventory,
+        tex_part_input,
+        validate_map_scope,
+        validate_scope,
+    )
     from execution_profiles import (
         EXECUTION_PROFILES,
         RUNTIMES,
@@ -1455,7 +1469,8 @@ def command_compose(args: argparse.Namespace) -> int:
         text = "% Generated composition; edit the registered part bodies, not this file.\n"
         text += "\n".join(tex_part_input(body) for body in bodies)
     else:
-        text = "\n\n".join(body.read_text(encoding="utf-8-sig").rstrip() for body in bodies) + "\n"
+        # 부분 경계가 있어야 빌드가 각 부분의 인계 메모만 지우고 뒷부분 본문을 남긴다.
+        text = markdown_composition([body.read_text(encoding="utf-8-sig") for body in bodies])
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output.parent, delete=False) as stream:
         staging = Path(stream.name)
@@ -2070,8 +2085,8 @@ def command_rerun(args: argparse.Namespace) -> int:
             )
         if args.role == "final_reviewer":
             raise RunError(
-                "final_reviewer만 직접 재실행할 수 없습니다. 실제로 바뀐 입력·집필·조판 역할을 "
-                "재실행하면 새 review cycle에서 변경된 완성본만 검수합니다."
+                "final_reviewer만 직접 재실행할 수 없습니다. 실제로 바뀐 입력·집필 역할을 재실행하면 "
+                "새 review cycle에서 바뀐 원고를 검수합니다. 조판만 다시 만들 때는 기존 검수를 그대로 씁니다."
             )
 
         entry = get_role(state, args.role)
@@ -2083,14 +2098,12 @@ def command_rerun(args: argparse.Namespace) -> int:
         invalidate_downstream(state["roles"], args.role)
         reopen_role(entry, args.reason)
         refresh_statuses(state["roles"])
-        # DEEP 조판 계약만 바뀌면 같은 TeX의 내용 검수와 호출 원장을 보존한다.
-        # 본문·자료 변경은 verify의 기존 해시/지문 검사로 계속 거부된다.
-        layout_only_deep = (
-            state.get("note_mode") == "deep"
-            and args.role == "layout_builder"
-            and args.change_kind == "output_contract"
-        )
-        if not layout_only_deep:
+        # 조판 계약만 바뀌면 같은 원고의 내용 검수와 호출 원장을 보존한다(두 모드 공통). 최종 검수는
+        # 조판이 아니라 집필 초안을 검수하고 지문에도 조판을 넣지 않으므로, 여기서 cycle을 올리면
+        # 통과한 검수가 현재 cycle과 어긋나 verify가 영구히 실패한다. 본문·자료 변경은 verify의 기존
+        # 해시/지문 검사로 계속 거부된다.
+        layout_only = args.role == "layout_builder" and args.change_kind == "output_contract"
+        if not layout_only:
             advance_review_cycle(state, f"선택 재실행: {args.role} ({args.change_kind})")
         append_event(
             state,

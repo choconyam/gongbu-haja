@@ -16,11 +16,11 @@
 python -m pip install -r requirements-recording.txt
 ```
 
-사용 가능한 Windows 출력 루프백 장치를 확인하고 30초 시험 녹음을 만든다.
+사용 가능한 Windows 출력 루프백 장치를 확인하고 30초 시험 녹음을 만든다. 시험 녹음은 임시 폴더에 만들고 확인한 뒤 지운다. 강의 폴더에 남기면 같은 강의 ID로 먼저 전사되어 본 녹음 전사가 건너뛰어진다.
 
 ```powershell
 python scripts/record_lecture.py --list-devices
-python scripts/record_lecture.py --lecture-id "2026-03-10_과목A_본강의" --duration 30
+python scripts/record_lecture.py --lecture-id "2026-03-10_과목A_본강의" --duration 30 --output "$env:TEMP\gongbu-test.wav"
 ```
 
 시험 파일을 재생해 음량을 확인한 뒤 본 녹음을 시작한다. `--duration`을 생략하면 `Ctrl+C`를 누를 때까지 녹음한다. 재생 배속은 기본 **1.75배**다(`--playback-rate`, 최대 2). 플레이어가 배속을 지원하면 1.75배로 틀어 녹음 시간을 줄이고, 사이트가 배속을 막으면 `--playback-rate 1`로 1배 재생한다. 배속은 녹음 옆 `.recording.json`과 전사 manifest에 남고, 전사 타임스탬프는 녹음 시간 기준이다.
@@ -116,7 +116,7 @@ python scripts/apply_transcript_corrections.py `
 
 ## 강의 이름 처리
 
-원본 녹음 파일은 이름을 바꾸거나 덮어쓰지 않는다. 파일명에서 날짜와 과목을 확정할 수 있으면 다음 형식의 `lecture_id`를 자동 생성한다.
+원본 녹음 파일은 이름을 바꾸거나 덮어쓰지 않는다. 녹음기로 만든 녹음은 옆의 `.recording.json`에 남은 강의 ID를 그대로 쓴다. 그 밖의 파일은 파일명에서 날짜와 과목을 확정할 수 있으면 다음 형식의 `lecture_id`를 자동 생성한다.
 
 ```text
 2026-03-10_과목A_본강의

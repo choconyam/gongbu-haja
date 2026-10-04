@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""학습노트 Markdown을 A4 PDF로 결정적으로 조판한다.
+"""학습노트 원고를 학생용 Markdown 또는 A4 PDF로 결정적으로 출력한다.
 
-조판은 내용을 바꾸지 않는다. 이 스크립트는 `<!-- ... -->` 추적 주석과 `후속 역할 인계 메모`
-이후만 걷어내고 나머지 문장·표·목록을 그대로 렌더한다. 한 강의마다 조판 에이전트를 부르지
-않기 위해 만든 공통 빌더라서 과목·차시·요약만 인자로 받는다.
+조판은 내용을 바꾸지 않는다. 이 스크립트는 `<!-- ... -->` 추적 주석과 원고 끝의
+`## 후속 역할 인계 메모` 절만 걷어내고 나머지 문장·표·목록을 그대로 내보낸다. 진도별 누적
+원고는 부분 경계마다 그 부분의 메모만 지운다. 한 강의마다 조판 에이전트를 부르지 않기 위해
+만든 공통 빌더라서 과목·차시·요약만 인자로 받는다.
 
     python scripts/build_study_note_pdf.py work/note_draft.md --output output/노트.pdf \
         --course "과목A" --session "1주차 2차시" --summary "핵심 개념과 적용"
 
 기존 PDF 경로의 글꼴은 Windows 한글 TrueType을 순서대로 찾는다. 다른 OS에서는
 `--font-body` / `--font-head` 로 TTF 경로를 준다. DEEP PDF는 --note-mode deep과
-TeX 본문을 받아 build_deep_pdf.py의 최소 디자인 XeLaTeX 경로로 조판한다.
+TeX 본문을 받아 build_deep_pdf.py의 XeLaTeX 경로로 조판한다(디자인은 deep_note_style.tex).
 """
 
 from __future__ import annotations
@@ -22,8 +23,15 @@ import sys
 import subprocess
 from pathlib import Path
 
+try:
+    from .note_scope import MARKDOWN_PART_BOUNDARY
+except ImportError:  # `python scripts/build_study_note_pdf.py`로 직접 실행할 때
+    from note_scope import MARKDOWN_PART_BOUNDARY
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 try:
     from reportlab.lib import colors
@@ -79,7 +87,33 @@ FONT_CANDIDATES = (
     ("malgun.ttf", "malgunbd.ttf", "malgun.ttf", "malgunbd.ttf"),
 )
 COMMENT_RE = re.compile(r"[ \t]*<!--.*?-->[ \t]*\n?", re.DOTALL)
+# 인계 메모는 원고(누적 원고는 각 부분)의 마지막 절이다. 이 제목부터 그 끝까지 학생용 출력에서 빠진다.
 HANDOFF_MARKER = "## 후속 역할 인계 메모"
+HANDOFF_RE = re.compile(r"#{1,6}[ \t]+후속 역할 인계 메모(?:[ \t].*)?")
+PART_BOUNDARY_RE = re.compile(r"^[ \t]*" + re.escape(MARKDOWN_PART_BOUNDARY) + r"[ \t]*$", re.MULTILINE)
+FENCE_RE = re.compile(r" {0,3}(`{3,}|~{3,})")
+
+
+class HandoffMemoError(ValueError):
+    """부분 경계 없이 인계 메모가 여러 번 나와, 지우면 그 사이 본문까지 사라지는 원고."""
+
+
+# 기존 PDF 빌더(reportlab)는 수식·이미지를 그리지 못해 원문 그대로 찍는다. 코드 안의 $ 등은 세지 않는다.
+FENCED_CODE_RE = re.compile(r"(?ms)^ {0,3}(`{3,}|~{3,}).*?^ {0,3}\1[ \t]*$")
+INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+RAW_MATH_RE = re.compile(r"\$\$|\\\(|\\\[|\$[^$\n]*[\\_^][^$\n]*\$")
+IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
+
+
+def unsupported_pdf_markup(text: str) -> list[str]:
+    """기존 PDF 빌더가 그리지 못하는 요소 이름. 비어 있으면 그대로 조판할 수 있다."""
+    prose = INLINE_CODE_RE.sub("", FENCED_CODE_RE.sub("", text))
+    found = []
+    if RAW_MATH_RE.search(prose):
+        found.append("수식")
+    if IMAGE_RE.search(prose):
+        found.append("이미지")
+    return found
 
 
 def resolve_fonts(body: Path | None, head: Path | None) -> dict[str, Path]:
@@ -387,12 +421,47 @@ def markdown_to_flowables(text: str, styles: dict[str, ParagraphStyle], width: f
     return output
 
 
+def handoff_lines(lines: list[str]) -> list[int]:
+    """코드 블록 밖에 있는 인계 메모 제목 줄의 위치. 본문 문장이나 코드 속 같은 문구는 세지 않는다."""
+    found: list[int] = []
+    fence: str | None = None
+    for index, line in enumerate(lines):
+        stripped = line.rstrip("\r\n")
+        opener = FENCE_RE.match(stripped)
+        if opener:
+            run = opener.group(1)
+            if fence is None:
+                fence = run
+            elif run[0] == fence[0] and len(run) >= len(fence) and stripped.strip() == run:
+                fence = None
+            continue
+        if fence is None and HANDOFF_RE.fullmatch(stripped.strip()):
+            found.append(index)
+    return found
+
+
+def strip_handoff(part: str) -> str:
+    """원고 하나(누적 원고는 부분 하나)에서 인계 메모 제목부터 끝까지 지운다."""
+    lines = part.splitlines(keepends=True)
+    found = handoff_lines(lines)
+    if not found:
+        return part
+    if len(found) > 1:
+        raise HandoffMemoError(
+            "인계 메모 제목이 부분 경계 없이 두 번 이상 나옵니다. 그대로 지우면 그 사이 본문까지 사라지므로 멈췄습니다. "
+            "진도별 원고는 manage_run.py compose로 다시 이어 붙이고, 한 원고에는 인계 메모를 맨 끝에 한 번만 두십시오."
+        )
+    return "".join(lines[: found[0]])
+
+
 def public_text(markdown: str) -> str:
-    """추적 주석과 내부 인계 메모를 제거한 학생용 본문."""
-    text = COMMENT_RE.sub("", markdown)
-    if HANDOFF_MARKER in text:
-        text = text.split(HANDOFF_MARKER, 1)[0].rstrip()
-    return text.strip() + "\n"
+    """추적 주석과 내부 인계 메모를 제거한 학생용 본문.
+
+    compose가 넣은 부분 경계마다 메모를 따로 지우므로 앞부분의 메모 때문에 뒷부분 본문이
+    사라지지 않는다.
+    """
+    parts = [strip_handoff(COMMENT_RE.sub("", part)).strip() for part in PART_BOUNDARY_RE.split(markdown)]
+    return "\n\n".join(part for part in parts if part) + "\n"
 
 
 def build(
@@ -464,12 +533,12 @@ def build(
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="학습노트 Markdown을 A4 PDF로 결정적으로 조판합니다.")
+    parser = argparse.ArgumentParser(description="학습노트 원고를 학생용 Markdown 또는 A4 PDF로 결정적으로 출력합니다.")
     parser.add_argument("source", type=Path, help="Markdown 초안 또는 DEEP용 TeX 본문 조각")
     parser.add_argument("--note-mode", choices=("faithful", "deep"), default=None,
-                        help="deep PDF는 최소 디자인 XeLaTeX 경로. faithful/생략은 기존 경로 유지.")
+                        help="deep PDF는 deep_note_style.tex를 쓰는 XeLaTeX 경로. faithful/생략은 기존 경로 유지.")
     parser.add_argument("--tex-korean-font", default=None, help="DEEP용 설치된 한글 글꼴 이름(선택)")
-    parser.add_argument("--output", type=Path, required=True, help="만들 PDF 경로")
+    parser.add_argument("--output", type=Path, required=True, help="만들 파일 경로(.md는 학생용 Markdown, .pdf는 PDF)")
     parser.add_argument("--course", required=True, help="과목명(표지·머리글)")
     parser.add_argument("--session", required=True, help="차시 표기(예: 1주차 2차시)")
     parser.add_argument("--summary", default=None, help="표지 한 줄 요약(선택)")
@@ -482,7 +551,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--format",
         choices=("pdf", "md"),
         default=None,
-        help="출력 형식. 생략하면 --output 확장자로 정한다(.md → md, 그 외 pdf). md는 추적 주석만 제거한 학생용 Markdown.",
+        help="출력 형식. 생략하면 --output 확장자로 정한다(.md → md, 그 외 pdf). md는 추적 주석·인계 메모를 지운 학생용 Markdown.",
     )
     return parser.parse_args(argv)
 
@@ -508,17 +577,22 @@ def main(argv: list[str] | None = None) -> int:
     if source == output:
         print("[오류] 원고와 출력 경로는 달라야 합니다.", file=sys.stderr)
         return 2
+    # 형식과 확장자가 다르면 Markdown 글자가 .pdf에 들어가는 식의 깨진 파일이 생긴다.
+    if output.suffix.lower() != f".{output_format}":
+        print(f"[오류] {output_format} 출력은 .{output_format} 경로를 사용하십시오: {output}", file=sys.stderr)
+        return 2
     if output.exists() and not args.force:
         print(f"[오류] 기존 출력을 덮어쓰지 않습니다(--force 로 교체): {output}", file=sys.stderr)
         return 2
     if output_format == "md":
-        if args.note_mode == "deep" and output.suffix.lower() != ".md":
-            print("[오류] DEEP의 명시적 Markdown 출력은 .md 경로를 사용하십시오.", file=sys.stderr)
-            return 2
         if source.suffix.lower() == ".tex":
             print("[오류] TeX 입력을 Markdown으로 복사하지 않습니다.", file=sys.stderr)
             return 2
-        print(write_markdown(source, output, args.course, args.session))
+        try:
+            print(write_markdown(source, output, args.course, args.session))
+        except HandoffMemoError as exc:
+            print(f"[오류] {exc}", file=sys.stderr)
+            return 2
         return 0
     if args.note_mode == "deep" or source.suffix.lower() == ".tex":
         if source.suffix.lower() != ".tex" or output.suffix.lower() != ".pdf":
@@ -538,6 +612,15 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(output)
         return 0
+    try:
+        blocked = unsupported_pdf_markup(public_text(source.read_text(encoding="utf-8")))
+    except HandoffMemoError as exc:
+        print(f"[오류] {exc}", file=sys.stderr)
+        return 2
+    if blocked:
+        print(f"[오류] 이 원고의 {'·'.join(blocked)}은(는) 기존 PDF 빌더가 그리지 못해 원문 그대로 찍힙니다. "
+              "깨진 PDF를 만들지 않았습니다. Markdown(.md)으로 받으십시오.", file=sys.stderr)
+        return 2
     if REPORTLAB_ERROR is not None:
         print("[오류] reportlab이 없습니다. `python -m pip install reportlab` 후 다시 실행하십시오.", file=sys.stderr)
         return 2
@@ -546,7 +629,11 @@ def main(argv: list[str] | None = None) -> int:
     except FileNotFoundError as exc:
         print(f"[오류] {exc}", file=sys.stderr)
         return 2
-    build(source, output, args.course, args.session, args.summary, args.meta, args.kicker, fonts)
+    try:
+        build(source, output, args.course, args.session, args.summary, args.meta, args.kicker, fonts)
+    except HandoffMemoError as exc:
+        print(f"[오류] {exc}", file=sys.stderr)
+        return 2
     print(output)
     return 0
 

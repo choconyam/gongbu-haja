@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -147,6 +149,27 @@ class TranscriptionPlanTests(unittest.TestCase):
 
 
 class SubjectInferenceTests(unittest.TestCase):
+    def test_recorder_sidecar_lecture_id_names_the_transcript(self) -> None:
+        # gongbu record --lecture-id 로 만든 녹음은 파일명 추정 대신 같은 강의 ID로 전사된다.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            audio = root / "녹음.wav"
+            with wave.open(str(audio), "wb") as stream:
+                stream.setnchannels(1)
+                stream.setsampwidth(2)
+                stream.setframerate(16000)
+                stream.writeframes(b"\0\0" * 1600)
+            audio.with_name(audio.stem + ".recording.json").write_text(json.dumps(
+                {"kind": "lecture_recording_sidecar", "lecture_id": "2026-03-10_1주차", "playback_rate": 1.75}),
+                encoding="utf-8")
+            argv = ["transcribe_lecture.py", str(audio), "--dry-run", "--model", "small", "--device", "cpu",
+                    "--output-root", str(root / "out")]
+            with patch.object(sys, "argv", argv), contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(0, tl.main())
+            text = output.getvalue()
+            plan = json.loads(text[text.index("{"):])
+            self.assertEqual("2026-03-10_1주차", plan["identity"]["lecture_id"])
+
     def test_recommended_naming_does_not_duplicate_lecture_type(self) -> None:
         # 권장 형식(날짜_과목_본강의) 파일명에서 '본강의'가 과목에 섞이면 안 된다.
         self.assertEqual("과목A", tl.infer_subject("2026-03-10_과목A_본강의"))

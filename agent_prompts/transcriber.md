@@ -22,7 +22,7 @@
 
 1. 원본 파일을 수정하거나 덮어쓰지 않고 파일명, 형식, 크기, 가능한 경우 재생시간과 언어를 기록한다.
 2. 관리자가 확정한 `lecture_id`를 받는다. 파일명과 교안으로 과목·날짜가 명확하면 자동 추정을 허용하고, 불명확할 때만 사용자 확인 결과를 사용한다.
-3. `../scripts/transcribe_lecture.py`를 프로젝트 루트에서 다음처럼 실행한다. 스크립트는 원본 옆이 아니라 프로젝트 `workspace/<강의ID>/transcript/`에만 쓴다. 모델은 기본값 `auto`를 유지해 컴퓨터 사양에 맞는 모델이 자동 선택되게 하고, 실제 사용된 모델이 manifest에 기록됐는지 확인한다.
+3. `../scripts/transcribe_lecture.py`를 프로젝트 루트에서 다음처럼 실행한다. 스크립트는 원본 옆에 쓰지 않는다. 저장소에서 직접 실행하면 `workspace/<강의ID>/transcript/`, 과목 폴더에서 `gongbu transcribe`로 실행하면 `<과목>/.gongbu/<강의ID>/transcript/`에 쓴다. 녹음기가 만든 녹음은 옆의 `.recording.json`에 남은 강의 ID를 그대로 쓴다. 모델은 기본값 `auto`를 유지해 컴퓨터 사양에 맞는 모델이 자동 선택되게 하고, 실제 사용된 모델이 manifest에 기록됐는지 확인한다.
 
 ```powershell
 python scripts/transcribe_lecture.py <녹음> --lecture-id <강의ID>
@@ -41,11 +41,11 @@ python scripts/transcribe_batch.py <녹음_폴더_또는_파일들>
 9. 들리지 않거나 후보가 여러 개인 핵심 부분은 segments와 manifest에 구간·이유를 남기고, Markdown 해당 발언에는 `[전사 불명확]` 또는 `[청취 불가]`를 표시한다.
 10. 숫자, 단위, 수식 읽기, 고유명사, 외국어 용어는 문맥으로 임의 확정하지 않고 검수 후보에 기록한다.
 11. 자동 인식의 반복 문장, 무음 환각, 순서 뒤바뀜, 잘린 시작·끝을 점검한다.
-12. 정리한 작업본을 강의ID_transcript_reviewed.md로 저장하고 manifest 상태를 `reviewed`, `reviewed_against_audio=false`로 갱신한다.
+12. 전사본을 손으로 고쳐 저장하지 않는다. 교정은 전사 검수 단계의 구조화한 결정으로만 `../scripts/apply_transcript_corrections.py`가 반영하며, 이 도구가 강의ID_transcript_reviewed.md를 만든다. 이 단계의 manifest 상태는 `raw`, `reviewed_against_audio=false`로 둔다.
 13. `../scripts/validate_transcript_package.py`를 프로젝트 루트에서 실행한다.
 
 ```powershell
-python scripts/validate_transcript_package.py <정리_전사본> --audio <녹음> --manifest <메타데이터>
+python scripts/validate_transcript_package.py <전사본_draft.md> --audio <녹음> --manifest <메타데이터>
 ```
 
 14. 전사 구간 JSON과 교안이 있으면 `../scripts/prepare_transcript_review.py`로 용어 후보와 검수 패킷을 만든다. 전체 후보·색인·manifest는 `model_input=false`인 로컬 캐시다. `../scripts/select_review_packets.py`가 총 16KiB 안에서 고른 `model_input=true` 개별 패킷만 다음 역할에 전달한다. 이 결과는 자동 교정 결과가 아니다.
@@ -58,12 +58,12 @@ python scripts/validate_transcript_package.py <정리_전사본> --audio <녹음
 - 강의ID_transcript_raw.txt — 검색용 자동 전사 원형
 - 강의ID_transcript_draft.md — 시간표시·반복 화자 표지를 뺀 학습노트 입력용 초안
 - 강의ID_segments.json — 구간별 시간·텍스트·신뢰도 관련 값
-- 강의ID_transcript_reviewed.md — 승인된 교정을 반영한 간결형 작업본
+- 강의ID_transcript_reviewed.md — 승인된 교정만 반영한 간결형 작업본(교정 도구 산출물, 교정이 있을 때만)
 - 강의ID_transcript_manifest.json — 원본 해시, 모델, 장치, 언어, 검증 상태, 미해결 구간
 - 전문용어·수치·수식·인명 확인 필요 목록
 - Python이 만든 용어 후보·전사 검수 패킷(해당 시)
 
-메타데이터의 최소 필드는 `source_audio`, `transcription_method`, `language`, `status`, `reviewed_against_audio`, `unresolved_spans`다. 녹음 없이 받은 전사본은 `source_audio`를 `null`, `reviewed_against_audio`를 `false`, `status`를 `transcript_only`로 기록한다.
+메타데이터의 최소 필드는 `source_audio`, `transcription_method`, `language`, `status`, `reviewed_against_audio`, `unresolved_spans`다. 녹음을 연결해 검사하면 `source_audio_sha256`도 필요하다. 녹음 없이 받은 전사본은 `source_audio`를 `null`, `reviewed_against_audio`를 `false`, `status`를 `transcript_only`로 기록한다.
 
 ## 금지 사항
 

@@ -1,0 +1,201 @@
+% gongbu-haja DEEP 노트 디자인 — 표지·머리말·원본 슬라이드·강조 상자·간격의 단일 원본.
+%
+% 쓰는 법(완전한 TeX 문서):
+%   \documentclass[a4paper,11pt]{article}
+%   \input{"<엔진>/scripts/deep_note_style.tex"}   % 경로에 공백이 있어도 되도록 따옴표로 감싼다
+%   \newcommand{\sourcepdf}{<교안 PDF 경로>}          % \sourceslide{쪽} 형식을 쓸 때
+%   \gongbuheader{과목 · 장}{짧은 주제}
+%   \begin{document}
+%   \gongbucover{과목}{차시 제목}{주제 한 줄}
+%   ... 본문 ...
+%   \end{document}
+%
+% 바꿀 수 있는 값(\input 앞에 정의):
+%   \newcommand{\GongbuFontDir}{<폴더>/}   NotoSerifKR-VF.ttf·NotoSansKR-VF.ttf가 있는 폴더(끝에 / 필요)
+%   \newcommand{\GongbuSlideScale}{0.74}   원본 슬라이드에 곱하는 전체 배율
+% 관리형 빌드(build_deep_pdf.py)는 GONGBU_FONT_DIR, Windows 글꼴 폴더, 사용자 글꼴 폴더 순으로
+% 가변 글꼴을 찾아 \GongbuFontDir를 정한다. 대체 글꼴을 쓰면 로그에 GONGBU-FONT-FALLBACK을 남긴다.
+%
+% 문서마다 서문을 새로 쓰거나 이 값을 옮겨 적지 않는다. 디자인 변경은 이 파일에서만 한다.
+\makeatletter
+
+\usepackage[a4paper,top=19mm,bottom=17mm,left=19mm,right=19mm,
+  headheight=14pt,headsep=6mm,footskip=9mm]{geometry}
+\usepackage[no-math]{fontspec}  % 수식 안 글자(\mathrm 포함)는 Computer Modern 그대로
+\usepackage{kotex}
+\usepackage{amsmath,amssymb,graphicx}
+\usepackage{xcolor,titlesec,fancyhdr,booktabs,tabularx,array}
+\usepackage[breakable,skins]{tcolorbox}
+\usepackage{needspace,etoolbox}
+\usepackage[hidelinks]{hyperref}
+
+% ------------------------------------------------------------------ 글꼴
+% 본문은 Noto Serif KR, 제목·머리말·캡션은 Noto Sans KR의 가변 글꼴 파일을 경로로 불러온다.
+% XeTeX는 가변 글꼴의 굵기를 고르지 못해 기본값(Serif ExtraLight, Sans Thin)이 쓰인다. 이 얇은 모양이
+% 기준 디자인이며, 굵은 글씨에만 AutoFakeBold를 쓰고 일반 글자에는 획 보정을 하지 않는다.
+% 가변 글꼴 파일이 없으면 Noto CJK → OS 기본 명조·고딕 순서로 대체한다. 이름("Noto Serif KR")으로
+% 가변 글꼴을 부르면 xdvipdfmx가 굵기 인스턴스를 넣지 못해 실패하므로 이름으로는 부르지 않는다.
+\providecommand{\GongbuFontDir}{C:/Windows/Fonts/}
+% 대체 글꼴을 쓰면 빌더가 알릴 수 있게 로그에 남긴다(디자인 기준과 다른 글꼴이므로 QA에 기록한다).
+\newcommand{\gongbu@fallback}[2]{\typeout{GONGBU-FONT-FALLBACK #1=#2}}
+\IfFileExists{\GongbuFontDir NotoSerifKR-VF.ttf}{%
+  \setmainfont[Path=\GongbuFontDir,AutoFakeBold=2.0]{NotoSerifKR-VF.ttf}%
+  \setmainhangulfont[Path=\GongbuFontDir,AutoFakeBold=2.0]{NotoSerifKR-VF.ttf}%
+}{%
+  \IfFontExistsTF{Noto Serif CJK KR}{%
+    \setmainfont{Noto Serif CJK KR}[AutoFakeBold=2.0]\setmainhangulfont{Noto Serif CJK KR}[AutoFakeBold=2.0]%
+    \gongbu@fallback{serif}{Noto Serif CJK KR}%
+  }{\IfFontExistsTF{Batang}{%
+    \setmainfont{Batang}[AutoFakeBold=2.0]\setmainhangulfont{Batang}[AutoFakeBold=2.0]%
+    \gongbu@fallback{serif}{Batang}%
+  }{\IfFontExistsTF{AppleMyungjo}{%
+    \setmainfont{AppleMyungjo}[AutoFakeBold=2.0]\setmainhangulfont{AppleMyungjo}[AutoFakeBold=2.0]%
+    \gongbu@fallback{serif}{AppleMyungjo}%
+  }{\PackageError{gongbu-deep}{본문 한글 글꼴을 찾지 못했습니다}%
+     {Noto Serif KR 또는 Noto Serif CJK KR을 설치하거나 \string\GongbuFontDir 를 지정하십시오.}}}}%
+}
+\IfFileExists{\GongbuFontDir NotoSansKR-VF.ttf}{%
+  \setsansfont[Path=\GongbuFontDir,AutoFakeBold=2.0]{NotoSansKR-VF.ttf}%
+  \setsanshangulfont[Path=\GongbuFontDir,AutoFakeBold=2.0]{NotoSansKR-VF.ttf}%
+}{%
+  \IfFontExistsTF{Noto Sans CJK KR}{%
+    \setsansfont{Noto Sans CJK KR}[AutoFakeBold=2.0]\setsanshangulfont{Noto Sans CJK KR}[AutoFakeBold=2.0]%
+    \gongbu@fallback{sans}{Noto Sans CJK KR}%
+  }{\IfFontExistsTF{Malgun Gothic}{%
+    \setsansfont{Malgun Gothic}\setsanshangulfont{Malgun Gothic}%
+    \gongbu@fallback{sans}{Malgun Gothic}%
+  }{\IfFontExistsTF{Apple SD Gothic Neo}{%
+    \setsansfont{Apple SD Gothic Neo}\setsanshangulfont{Apple SD Gothic Neo}%
+    \gongbu@fallback{sans}{Apple SD Gothic Neo}%
+  }{\PackageError{gongbu-deep}{제목용 한글 글꼴을 찾지 못했습니다}%
+     {Noto Sans KR 또는 Noto Sans CJK KR을 설치하거나 \string\GongbuFontDir 를 지정하십시오.}}}}%
+}
+
+% ------------------------------------------------------------------ 색
+\definecolor{Ink}{HTML}{1F2933}
+\definecolor{Muted}{HTML}{7B8794}
+\definecolor{Hairline}{HTML}{D3D9E0}
+\definecolor{Accent}{HTML}{1F4E79}
+\definecolor{AccentLight}{HTML}{EEF4FA}
+\definecolor{Warn}{HTML}{A64B00}
+\definecolor{WarnLight}{HTML}{FFF6EB}
+\definecolor{Good}{HTML}{0B6E4F}
+\definecolor{GoodLight}{HTML}{EDF8F3}
+
+% ------------------------------------------------------------------ 문단·수식 간격
+\setlength{\parindent}{1.2em}
+\setlength{\parskip}{0.18em plus 0.12em}
+\linespread{1.20}
+\raggedbottom
+\emergencystretch=2em
+\AtBeginDocument{%
+  \setlength{\abovedisplayskip}{6pt plus 2pt minus 2pt}%
+  \setlength{\belowdisplayskip}{6pt plus 2pt minus 2pt}%
+  \setlength{\abovedisplayshortskip}{2pt plus 2pt}%
+  \setlength{\belowdisplayshortskip}{4pt plus 2pt minus 1pt}%
+  \color{Ink}}
+
+% ------------------------------------------------------------------ 제목
+% 제목 뒤에는 보통 원본 슬라이드가 온다. 제목만 쪽 끝에 홀로 남지 않도록 먼저 자리를 확인한다.
+\titleformat{\section}{\sffamily\bfseries\fontsize{16}{20}\selectfont\color{Accent}}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\sffamily\bfseries\fontsize{12}{15}\selectfont\color{Accent}}{\thesubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{11pt}{3pt}
+\titlespacing*{\subsection}{0pt}{8pt}{2pt}
+\pretocmd{\section}{\Needspace*{0.34\textheight}}{}{}
+\pretocmd{\subsection}{\Needspace*{0.30\textheight}}{}{}
+
+% ------------------------------------------------------------------ 머리말·쪽 번호
+\pagestyle{fancy}\fancyhf{}
+\newcommand{\gongbu@headleft}{}
+\newcommand{\gongbu@headright}{}
+\newcommand{\gongbuheader}[2]{\renewcommand{\gongbu@headleft}{#1}\renewcommand{\gongbu@headright}{#2}}
+\fancyhead[L]{\sffamily\fontsize{8.5}{10}\selectfont\color{Muted}\gongbu@headleft}
+\fancyhead[R]{\sffamily\fontsize{8.5}{10}\selectfont\color{Muted}\gongbu@headright}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{Hairline}\leaders\hrule height\headrulewidth\hfill}}
+\fancyfoot[C]{\sffamily\fontsize{9}{11}\selectfont\color{Muted}\thepage}
+
+% ------------------------------------------------------------------ 원본 슬라이드
+% 네 형식을 모두 받는다.
+%   \sourceslide[크기]{쪽}           \sourcepdf의 해당 쪽
+%   \sourceslide[크기]{파일}{쪽}     지정한 PDF의 해당 쪽
+%   \sourceimage[크기]{이미지}{쪽}   쪽을 렌더한 이미지(캡션 원본 PDF p.쪽)
+%   \sourceimage[크기]{이미지}       쪽 번호를 알 수 없는 이미지(캡션 원본 교안)
+% 쪽 인자를 뒤에 붙여 받으므로, 매크로 바로 다음 줄을 {로 시작하는 본문으로 잇지 말고 빈 줄을 둔다.
+% 크기에 \textheight가 들어 있으면 최대 높이, 아니면 폭으로 읽는다. 지정한 값에 \GongbuSlideScale
+% (기본 0.74)을 곱하고, 다른 쪽은 쪽 한계(폭 0.84\linewidth, 높이 0.60\textheight)만 둔다. 생략하면
+% 폭 0.84\linewidth·높이 0.34\textheight 상자 전체에 배율을 곱한다.
+% 얇은 테두리로 원본과 노트를 구분하고, 캡션은 슬라이드 오른쪽 끝에 맞춘다. 슬라이드만 쪽 끝에
+% 남고 설명이 다음 쪽으로 밀리지 않도록 설명 두 줄 자리를 함께 확보한다.
+\providecommand{\GongbuSlideScale}{0.74}
+\newsavebox{\gongbu@slidebox}
+\newlength{\gongbu@slidew}
+\newlength{\gongbu@slideh}
+\newcommand{\gongbu@slidesize}[1]{%
+  \ifx\relax#1\relax
+    \setlength{\gongbu@slidew}{\GongbuSlideScale\dimexpr0.84\linewidth\relax}%
+    \setlength{\gongbu@slideh}{\GongbuSlideScale\dimexpr0.34\textheight\relax}%
+  \else
+    \in@{\textheight}{#1}%
+    \ifin@
+      \setlength{\gongbu@slidew}{0.84\linewidth}%
+      \setlength{\gongbu@slideh}{\GongbuSlideScale\dimexpr#1\relax}%
+    \else
+      \setlength{\gongbu@slidew}{\GongbuSlideScale\dimexpr#1\relax}%
+      \setlength{\gongbu@slideh}{0.60\textheight}%
+    \fi
+  \fi}
+\newcommand{\gongbu@placeslide}[4]{% #1 크기, #2 그림 옵션, #3 파일, #4 캡션
+  \gongbu@slidesize{#1}%
+  \par\addvspace{7pt}%
+  \sbox{\gongbu@slidebox}{\setlength{\fboxsep}{0pt}\setlength{\fboxrule}{0.5pt}%
+    \fcolorbox{Hairline}{white}{\includegraphics[#2width=\gongbu@slidew,height=\gongbu@slideh,keepaspectratio]{#3}}}%
+  \Needspace*{\dimexpr\ht\gongbu@slidebox+\dp\gongbu@slidebox+2\baselineskip\relax}%
+  {\centering\setlength{\parskip}{0pt}%
+   \usebox{\gongbu@slidebox}\par\nopagebreak
+   \vspace{1.5pt}%
+   {\sffamily\fontsize{7.5}{9}\selectfont\color{Muted}\makebox[\wd\gongbu@slidebox][r]{#4}\par}}%
+  \nopagebreak[4]\vspace{2pt}}
+\newcommand{\sourceslide}[2][]{%
+  \@ifnextchar\bgroup{\gongbu@slidefile{#1}{#2}}{\gongbu@slidepage{#1}{#2}}}
+\newcommand{\gongbu@slidefile}[3]{\gongbu@placeslide{#1}{page=#3,}{#2}{원본 PDF p.#3}}
+\newcommand{\gongbu@slidepage}[2]{%
+  \ifdefined\sourcepdf\else
+    \PackageError{gongbu-deep}{\string\sourcepdf 가 정의되지 않았습니다}%
+      {\string\sourceslide{쪽} 형식을 쓰려면 \string\newcommand{\string\sourcepdf}{교안.pdf}를 먼저 정의하십시오.}%
+  \fi
+  \gongbu@placeslide{#1}{page=#2,}{\sourcepdf}{원본 PDF p.#2}}
+\newcommand{\sourceimage}[2][]{%
+  \@ifnextchar\bgroup{\gongbu@imagepage{#1}{#2}}{\gongbu@placeslide{#1}{}{#2}{원본 교안}}}
+\newcommand{\gongbu@imagepage}[3]{\gongbu@placeslide{#1}{}{#2}{원본 PDF p.#3}}
+\newcommand{\continuationslide}[1]{\gongbu@slidepage{}{#1}}
+
+% ------------------------------------------------------------------ 강조 상자
+% 왼쪽 색 막대와 옅은 바탕, 색 제목. 짧은 상자는 쪽 끝에서 쪼개지지 않게 다섯 줄 자리가 없으면 넘긴다.
+\tcbset{gongbu note/.style 2 args={enhanced,breakable,sharp corners,frame hidden,
+  colback=#2,borderline west={2.4pt}{0pt}{#1},
+  left=10pt,right=9pt,top=5pt,bottom=5pt,boxsep=0pt,
+  coltitle=#1,fonttitle=\sffamily\bfseries\fontsize{10}{12.5}\selectfont,
+  attach title to upper={\par\vspace{1.5pt}},
+  after skip=8pt,
+  before={\par\Needspace*{5\baselineskip}\addvspace{\glueexpr 8pt-\parskip}\nointerlineskip}}}
+\newtcolorbox{keybox}[1][핵심]{gongbu note={Accent}{AccentLight},title=#1}
+\newtcolorbox{warnbox}[1][주의]{gongbu note={Warn}{WarnLight},title=#1}
+\newtcolorbox{goodbox}[1][기억할 점]{gongbu note={Good}{GoodLight},title=#1}
+
+% ------------------------------------------------------------------ 표지
+% 과목(작게) → 차시 제목(크게) → 주제 한 줄 → 짧은 강조선. 밑줄(_)로 이어 붙인 제목을 쓰지 않는다.
+\newcommand{\gongbucover}[3]{%
+  \begin{titlepage}\thispagestyle{empty}\color{Ink}\setlength{\parindent}{0pt}%
+  \vspace*{52mm}%
+  {\sffamily\fontsize{11.5}{15}\selectfont\color{Accent}#1\par}%
+  \vspace{7pt}%
+  {\sffamily\bfseries\fontsize{26}{33}\selectfont #2\par}%
+  \ifx\relax#3\relax\else
+    \vspace{12pt}{\fontsize{12.5}{19}\selectfont\color{Muted}#3\par}%
+  \fi
+  \vspace{16mm}%
+  {\color{Accent}\rule{26mm}{1.6pt}\par}%
+  \end{titlepage}\setcounter{page}{1}}
+
+\makeatother

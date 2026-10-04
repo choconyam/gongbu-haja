@@ -93,7 +93,9 @@ AGENT_DESCRIPTIONS: dict[str, str] = {
     "faithful_note_reviewer": (
         "Independently checks faithful-mode notes for source coverage, omission, distortion, and duplication."
     ),
-    "deep_note_reviewer": "Performs one independent whole-note logic and derivation audit for deep mode.",
+    "deep_note_reviewer": (
+        "Performs the deep-mode whole-note logic and derivation audit, and resolves escalated evidence packets in either mode."
+    ),
 }
 
 AGENT_INSTRUCTIONS: dict[str, str] = {
@@ -105,10 +107,10 @@ Do not author notes or make final-review judgments; the manager assigns those ro
 Do not rerun the whole role after a local failure; request the exact missing page, section, or timestamp.
 """,
     "quality_note_worker": """Read only the assigned role prompt, deterministic source packet, predecessor artifact, mode contract, and output path.
-For faithful-mode authoring, use only the supplied course sources and reviewed instructor material. Preserve examples, caveats, corrections, and emphasis without adding outside background, new examples, or derivations.
+For faithful-mode authoring, use only the supplied course sources and confirmed instructor explanations. Keep every enumerated item, caveat, correction, and emphasis; keep one or two representative examples per concept and condense repeated ones. Do not add outside background, new examples, or derivations.
 For deep-mode authoring, restore prerequisite context, causal links, intermediate reasoning, derivations, examples, and application conditions only where they improve understanding.
-Keep course-source content, reviewed instructor explanations, and supplemental knowledge distinguishable. Verify supplemental claims and preserve uncertainty.
-For a faithful-mode escalation, resolve only the supplied ambiguity or source conflict; do not broaden the note or reread unrelated material.
+Keep course-source content, confirmed instructor explanations, and supplemental knowledge distinguishable. Verify supplemental claims and preserve uncertainty.
+For an escalated evidence packet, resolve only the supplied ambiguity or source conflict; do not broaden the note or reread unrelated material.
 Return the assigned artifact and a compact structured list of uncertainty, source conflict, derivation gap, and instructor-distortion risks. Never rewrite an already valid full note during a local repair.
 """,
     "faithful_note_reviewer": """Act independently from the writer. Compare every source_unit_id in the supplied source map with its mapped final-note location.
@@ -116,13 +118,15 @@ Do not add outside knowledge or rewrite the whole note. Classify each source uni
 Use excluded only with a specific reason. Use unresolved only when the uncertainty is visibly marked at a concrete note location.
 Return a study_note_source_coverage JSON report with reviewer_profile=review_high. Report missing, distorted, weakened, or duplicated course content as failures.
 Apply any necessary localized source-faithful patches and recheck only their affected locations within this one final-review call; never request a second whole-note pass.
-If a meaning conflict cannot be settled from the bounded evidence, request one exact evidence packet for the quality_high profile instead of guessing.
+If a meaning conflict cannot be settled from the bounded evidence, ask the manager to pass one exact evidence packet through manage_run.py escalate (it returns the quality_xhigh contract) instead of guessing.
 """,
-    "deep_note_reviewer": """Act independently from the author. Read the completed deep-mode note exactly once together with the compact source map, coverage ledger, and Python validation results.
+    "deep_note_reviewer": """This profile has two jobs; the manager names one in the invocation.
+Deep final review: act independently from the author. Read the completed deep-mode note exactly once together with the compact source map, coverage ledger, and Python validation results.
 Check global logical order, missing prerequisite links, derivation continuity, assumptions, application conditions, helpfulness of supplemental context, and distortion of instructor explanations.
 Do not reread the full raw transcript, recording, or every source. Open raw evidence only for an exact flagged source_unit_id supplied by the manager.
 Do not regenerate the whole note. Apply necessary localized patches, recheck only their affected locations, and finish within this single whole-note call. Return a concise verdict and a study_note_source_coverage JSON report with reviewer_profile=quality_xhigh.
 Pass only when every source unit is accounted for and no major logical, derivation, or attribution defect remains.
+Escalated packet (manage_run.py escalate, either mode): resolve only the supplied evidence packet for the named role and mode. Return the decision, its evidence, and any remaining uncertainty. Do not read the whole note, write a coverage report, or set reviewer_profile.
 """,
 }
 

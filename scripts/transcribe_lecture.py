@@ -777,7 +777,11 @@ def read_recording_sidecar(audio: Path) -> dict:
         rate = float(payload.get("playback_rate", 1.0))
     except (TypeError, ValueError):
         rate = 1.0
-    return {"playback_rate": rate if rate > 0 else 1.0, "_sidecar": sidecar.name}
+    meta = {"playback_rate": rate if rate > 0 else 1.0, "_sidecar": sidecar.name}
+    lecture_id = payload.get("lecture_id")
+    if isinstance(lecture_id, str) and lecture_id.strip():
+        meta["lecture_id"] = lecture_id.strip()
+    return meta
 
 
 def print_plan(
@@ -845,6 +849,9 @@ def main() -> int:
     if audio.suffix.lower() not in AUDIO_SUFFIXES:
         print(f"[경고] 일반적인 오디오 확장자가 아닙니다: {audio.suffix}", file=sys.stderr)
 
+    if not args.lecture_id:
+        # 녹음기가 sidecar에 남긴 강의 ID를 쓰면 녹음 폴더·실행 상태와 같은 이름으로 전사된다.
+        args.lecture_id = read_recording_sidecar(audio).get("lecture_id")
     try:
         identity = resolve_identity_interactively(args, audio)
         output_root = args.output_root.expanduser().resolve()

@@ -13,10 +13,17 @@ from urllib.parse import unquote
 
 try:
     from .execution_profiles import FORBIDDEN_MODELS
+    from .project_types import AUDIO_SUFFIXES
     from .sync_runtime_agents import drift_report as runtime_declaration_drift
 except ImportError:  # `python scripts/validate_agent_setup.py`로 직접 실행할 때
     from execution_profiles import FORBIDDEN_MODELS
+    from project_types import AUDIO_SUFFIXES
     from sync_runtime_agents import drift_report as runtime_declaration_drift
+
+try:
+    import tomllib
+except ImportError:  # Python 3.10: pyproject 대조만 건너뛴다.
+    tomllib = None
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -370,6 +377,10 @@ def validate(root: Path) -> Report:
         "test_gongbu_cli.py",
         "test_build_study_note_pdf.py",
         "build_study_note_pdf.py",
+        "test_build_deep_pdf.py",
+        "build_deep_pdf.py",
+        "deep_note_template.tex",
+        "deep_note_style.tex",
         "execution_profiles.py",
         "sync_runtime_agents.py",
         "project_types.py",
@@ -423,7 +434,9 @@ def validate(root: Path) -> Report:
                 for line in gitignore_text.splitlines()
                 if line.strip() and not line.lstrip().startswith("#")
             }
-            for pattern in REQUIRED_PRIVATE_GITIGNORE_PATTERNS:
+            # 받아들이는 녹음·녹화 형식은 저장 위치와 관계없이 모두 Git에서 빠져야 한다.
+            media_patterns = [f"*{suffix}" for suffix in sorted(AUDIO_SUFFIXES)]
+            for pattern in dict.fromkeys([*REQUIRED_PRIVATE_GITIGNORE_PATTERNS, *media_patterns]):
                 if pattern not in ignored_patterns:
                     report.add(
                         "error",
@@ -431,8 +444,52 @@ def validate(root: Path) -> Report:
                         f"강의·인증 정보 보호용 Git 제외 규칙이 없습니다: {pattern}",
                         gitignore_path,
                     )
+            cli_path = root / "gongbu_haja" / "cli.py"
+            cli_text = read_utf8(cli_path, report) if cli_path.is_file() else None
+            if cli_text is not None:
+                for pattern in media_patterns:
+                    if f'"{pattern}"' not in cli_text:
+                        report.add(
+                            "error",
+                            "missing-course-gitignore",
+                            f"과목 폴더용 Git 제외 규칙에 녹음 형식이 없습니다: {pattern}",
+                            cli_path,
+                        )
 
+    validate_requirement_files(root, report)
     return report
+
+
+def requirement_set(lines: list[str]) -> set[str]:
+    """공백·주석을 뺀 요구사항 집합. 같은 내용을 다른 띄어쓰기로 써도 같다고 본다."""
+    return {re.sub(r"\s+", "", line.split("#", 1)[0]) for line in lines if line.split("#", 1)[0].strip()}
+
+
+def validate_requirement_files(root: Path, report: Report) -> None:
+    """저장소 설치용 requirements와 CLI 설치용 pyproject 선택 의존성이 같은지 확인한다."""
+    pyproject = root / "pyproject.toml"
+    if tomllib is None or not pyproject.is_file():
+        return
+    try:
+        extras = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["optional-dependencies"]
+    except (OSError, UnicodeDecodeError, KeyError, tomllib.TOMLDecodeError) as exc:
+        report.add("error", "invalid-pyproject", f"pyproject.toml 선택 의존성을 읽을 수 없습니다: {exc}", pyproject)
+        return
+    for extra, name in (("recording", "requirements-recording.txt"), ("transcription", "requirements-transcription.txt")):
+        path = root / name
+        text = read_utf8(path, report) if path.is_file() else None
+        if text is None or extra not in extras:
+            continue
+        expected, actual = requirement_set(extras[extra]), requirement_set(text.splitlines())
+        if expected != actual:
+            missing = ", ".join(sorted(expected - actual)) or "없음"
+            extra_items = ", ".join(sorted(actual - expected)) or "없음"
+            report.add(
+                "error",
+                "requirements-drift",
+                f"{name}이 pyproject.toml [{extra}]와 다릅니다. 빠짐: {missing} / 더 있음: {extra_items}",
+                path,
+            )
 
 
 # -----------------------------------------------------------------------------

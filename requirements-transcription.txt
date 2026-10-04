@@ -1,2 +1,6 @@
 faster-whisper==1.2.1
 pypdf>=5.0
+# CUDA 런타임 휠이 없으면 GPU가 있어도 CPU small 모델로 전사된다. macOS에는 해당 휠이 없다.
+nvidia-cublas-cu12>=12.4; platform_system != 'Darwin'
+nvidia-cudnn-cu12>=9.1; platform_system != 'Darwin'
+nvidia-cuda-nvrtc-cu12>=12.4; platform_system != 'Darwin'

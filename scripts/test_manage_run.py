@@ -1191,6 +1191,8 @@ class ManageRunTests(unittest.TestCase):
 
             self.run_cli("start", str(state_file), "--role", "layout_builder")
             self.run_cli("complete", str(state_file), "--role", "layout_builder", "--artifact", str(state_file.parent / "layout_builder.txt"))
+            # 자료 충실형에서도 조판만 다시 만든 뒤 기존 검수 기록으로 완료 검증을 통과한다.
+            self.run_cli("verify", str(state_file), "--check-inputs")
             self.run_cli(
                 "rerun", str(state_file), "--role", "writer", "--reason", "사용자 편집 요청", "--change-kind", "user_request"
             )

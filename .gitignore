@@ -20,6 +20,8 @@ output/
 *.aac
 *.flac
 *.ogg
+*.opus
+*.wma
 *.webm
 *.mp4
 

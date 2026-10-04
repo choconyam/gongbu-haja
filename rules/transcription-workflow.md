@@ -8,15 +8,15 @@
 - Windows에서는 `../scripts/record_lecture.py`를 기본 로컬 녹음기로 사용한다. 이 스크립트는 PyAudioWPatch의 WASAPI 루프백으로 선택한 출력 장치에서 재생되는 소리를 WAV로 저장하며 마이크는 기본적으로 포함하지 않는다.
 - 로그인, 2단계 인증, CAPTCHA는 사용자가 직접 처리한다. 사이트의 접근 제어나 DRM을 우회하지 않는다.
 - 강의 사이트 주소는 사용자가 실행할 때마다 직접 제공하고 브라우저에서 연다. 특정 학교명, 사이트 URL, 계정 식별자, 비밀번호, 2단계 인증 값, 쿠키, 세션 토큰, 브라우저 프로필은 프로젝트 파일·상태 JSON·로그·예시·파일명에 저장하거나 Git/GitHub에 커밋하지 않는다. 인증 입력값을 읽거나 되받아 적지 않는다.
-- 재생 배속은 기본 **1.75배**다. 플레이어가 배속을 지원하면 1.75배로 재생해 녹음 시간을 줄인다(실측에서 large-v3 전사 정확도에 문제가 없었다). 사이트의 수강 인정 조건이 배속을 막거나 사용자가 1배를 요구하면 `--playback-rate 1`로 1배 재생한다. 2배를 넘기지 않는다. 녹음기는 배속을 녹음 옆 `<이름>.recording.json`에 남기고 전사 manifest의 `playback_rate`로 옮긴다. 전사 타임스탬프는 녹음 시간 기준이며 강의 시간은 타임스탬프 × 배속이다.
-- 본 녹음 전에 30초 시험 녹음을 만들고 재생 가능 여부와 음량을 확인한다. 출력 장치가 바뀌거나 다른 앱이 소리를 내면 녹음이 비거나 다른 소리가 섞일 수 있다.
+- 재생 배속은 기본 **1.75배**다. 플레이어가 배속을 지원하면 1.75배로 재생해 녹음 시간을 줄인다(실측에서 large-v3 전사 정확도에 문제가 없었다). 사이트의 수강 인정 조건이 배속을 막거나 사용자가 1배를 요구하면 `--playback-rate 1`로 1배 재생한다. 2배를 넘기지 않는다. 녹음기는 배속을 녹음 옆 `<이름>.recording.json`에 남기고 전사 manifest의 `playback_rate`로 옮긴다. 전사 타임스탬프는 녹음 시간 기준이며 강의 시간은 대략 타임스탬프 × 배속이다(일시정지한 구간은 실제 시간 그대로 녹음된다).
+- 본 녹음 전에 30초 시험 녹음을 만들고 재생 가능 여부와 음량을 확인한다. 시험 녹음은 강의 폴더가 아니라 임시 폴더에 만들고(`--output`) 확인 뒤 지운다. 강의 폴더에 남기면 같은 강의 ID로 먼저 전사되어 본 녹음 전사가 건너뛰어진다. 출력 장치가 바뀌거나 다른 앱이 소리를 내면 녹음이 비거나 다른 소리가 섞일 수 있다.
 - 저장소에서 직접 실행하면 녹음 파일은 기본 `input/<lecture_id>/` 아래에 새 타임스탬프 이름으로 저장한다. 저장소 밖 과목 폴더에서 스킬·플러그인으로 호출됐다면 `--output <호출한_폴더의_새_WAV_경로>`를 명시해 현재 과목 폴더를 그대로 입력 자료 폴더로 유지한다. 진행 중에는 `.part.wav` 작업 파일을 사용하고 정상 종료 또는 `Ctrl+C` 중단 시 완성 파일로 바꾼다. 기존 파일은 덮어쓰지 않는다.
-- 가능하면 녹음을 마친 뒤 `manage_run.py init`을 실행한다. 이미 실행 상태가 있으면 `refresh-inputs`로 새 녹음을 반영하고 상태 JSON을 직접 편집하지 않는다.
+- 녹음·전사만을 위해 새 실행 상태(`manage_run.py init`)를 만들지 않는다. 상태가 있으면 이후 노트 요청까지 관리형 실행으로 넘어간다. 이미 실행 상태가 있으면 `refresh-inputs`로 새 녹음을 반영하고 상태 JSON을 직접 편집하지 않는다.
 
 ```powershell
 python -m pip install -r requirements-recording.txt
 python scripts/record_lecture.py --list-devices
-python scripts/record_lecture.py --lecture-id <강의ID> --duration 30
+python scripts/record_lecture.py --lecture-id <강의ID> --duration 30 --output "$env:TEMP\gongbu-test.wav"   # 시험 녹음은 임시 폴더에
 python scripts/record_lecture.py --lecture-id <강의ID>                      # 기본 1.75배속 재생 전제
 python scripts/record_lecture.py --lecture-id <강의ID> --playback-rate 1   # 사이트가 배속을 막을 때
 ```
@@ -53,7 +53,7 @@ python scripts/record_lecture.py --lecture-id <강의ID> --playback-rate 1   # �
 - 모델 기본값 `auto`는 GPU 메모리에 맞는 가장 정확한 모델을 자동 선택하고, 실제 사용한 모델·선택 방식·티어를 manifest의 `model`, `model_selection`, `model_tier`에 기록한다. `large-v3`보다 작은 모델로 전사했다면 그 사실을 이상 후보의 우선순위에 반영한다.
 - 전사는 GPU 메모리를 독점하므로 동시에 하나만 실행한다. 녹음이 여러 개면 `../scripts/transcribe_batch.py`가 한 번에 하나씩 순서대로 처리한다.
 - 과목명과 날짜가 파일명·교안에서 명확하면 `lecture_id`를 자동 생성한다. 확정할 수 없을 때만 관리자가 사용자에게 묻고 `--lecture-id`로 전달한다.
-- 출력은 `workspace/<lecture_id>/transcript/`에 만들며 원본과 같은 위치에 TXT·SRT를 만들지 않는다.
+- 출력은 저장소에서 직접 실행하면 `workspace/<lecture_id>/transcript/`, 과목 폴더에서는 `<과목>/.gongbu/<lecture_id>/transcript/`에 만든다(`gongbu transcribe`가 자동 지정하고, 스크립트를 직접 쓰면 `--output-root <과목>/.gongbu`). 원본과 같은 위치에 TXT·SRT를 만들지 않는다. 녹음기가 만든 녹음은 옆의 `.recording.json`에 남은 강의 ID를 그대로 쓴다.
 - 요약이 아니라 원래 발언 순서를 유지한 전사를 만든다.
 - 재청취 위치는 원시 SRT와 segments JSON에 구간별로 보존한다. 학습노트 입력용 Markdown에는 타임스탬프를 반복하지 않는다.
 - 단일 강의자의 연속 발언이나 화자를 판별하지 않은 자동 전사에는 `[화자 불명]`을 반복하지 않는다. 발표·토론처럼 여러 화자의 구분이 내용 이해에 필요할 때만 `교수`, `학생`, `발표자 1`, `사회자` 같은 기능 표지를 Markdown에 남기며 신원은 추정하지 않는다.
@@ -67,7 +67,7 @@ python scripts/record_lecture.py --lecture-id <강의ID> --playback-rate 1   # �
 전사 직후 Python이 다음 검수 입력을 한 번 만든다.
 
 1. 구간별 `avg_logprob`, `no_speech_prob`, `compression_ratio`, 시간 길이, 반복과 미완성 표지를 검사한다.
-2. 교안 텍스트에서 빈도·괄호 병기·영문·짧은 제목형 줄을 근거 위치와 함께 용어 **후보**로 수집한다.
+2. 교안 텍스트에서 빈도·괄호 병기·영문 표기를 근거 위치와 함께 용어 **후보**로 수집한다.
 3. 낮은 신뢰도, 반복, 비정상 시간 밀도, 숫자·평가조건이 있는 구간을 후보로 고른다.
 4. 각 후보에 앞뒤 최대 2개 전사 구간과 관련도가 높은 교안 발췌만 붙인다.
 
@@ -83,7 +83,7 @@ Python은 문자열 유사도나 발음 유사도만으로 전사를 고치지 �
 2. _transcript_raw.srt와 _transcript_raw.txt
 3. 타임스탬프·반복 화자 표지를 뺀 _transcript_draft.md와 시간 정보를 보존한 _segments.json
 4. _transcript_manifest.json
-5. 전사 담당이 교정한 간결형 _transcript_reviewed.md
+5. 승인된 교정만 반영한 간결형 _transcript_reviewed.md(`../scripts/apply_transcript_corrections.py` 산출물, 교정이 있을 때만)
 6. 관리형 실행 또는 사용자 요청이 있을 때의 독립 검수 후 전사
 7. 타임스탬프와 교안 페이지·주제 정렬표
 
@@ -106,7 +106,7 @@ Python은 문자열 유사도나 발음 유사도만으로 전사를 고치지 �
 
 ## 7. 선택 검수와 노트 작성 중 확인
 
-`preprocessing=deterministic`인 자료 충실형은 `faithful-cost-path.md`의 경로가 이 절보다 우선한다. 전사 패키지 검사와 ASR 후보 표시는 Python으로 기록하고, 별도 전사 의미 담당은 기본 호출하지 않는다. 전사 전체를 먼저 검수하거나 시작·중간·끝을 관성적으로 듣지 않는다. 작성자가 교안과 전사를 강의 순서대로 함께 보면서 명백한 인식 오류를 교안 표기로 바로잡고, 그래도 확정되지 않는 핵심 구간만 원음을 확인한다. 자동 처리 완료나 교안 대조는 `audio_verified`가 아니며, 실제로 들은 범위만 기록한다.
+새 직접 제작(두 모드)과 `preprocessing=deterministic` 관리형 실행은 별도 전사 의미 담당을 호출하지 않는다. 관리형 자료 충실형은 `faithful-cost-path.md`의 경로가 이 절보다 우선한다. 전사 패키지 검사와 ASR 후보 표시는 Python으로 기록한다. 전사 전체를 먼저 검수하거나 시작·중간·끝을 관성적으로 듣지 않는다. 작성자가 교안과 전사를 강의 순서대로 함께 보면서 명백한 인식 오류를 교안 표기로 바로잡고, 그래도 확정되지 않는 핵심 구간만 원음을 확인한다. 자동 처리 완료나 교안 대조는 `audio_verified`가 아니며, 실제로 들은 범위만 기록한다.
 
 원음 확인은 다음 항목이 교안과 앞뒤 문맥만으로 해결되지 않을 때 수행한다.
 
@@ -118,9 +118,9 @@ Python은 문자열 유사도나 발음 유사도만으로 전사를 고치지 �
 
 인사·잡담·단순 행정 발언처럼 노트에서 제외할 구간의 사소한 오인식은 원음까지 확인하지 않는다. 교안 표기로 고친 경우에는 `handout`, 실제로 들은 경우에만 `audio`로 확인 근거를 구분한다.
 
-검수 에이전트는 Python이 만든 개별 후보 패킷부터 읽는다. 첫 검수는 `economy_high`로 한 번 수행한다. 숫자·수식·고유명사·평가조건처럼 중요한 미해결 구간은 `manage_run.py escalate`가 `model_input=true`, `kind=*packet`, 명시적 target, 16KiB 이하와 강의당 1회 제한을 모두 확인한 경우에만 그 패킷 하나를 `quality_high`로 재검수한다. 전체 전사 재호출이나 역할 단위 자동 승격은 하지 않는다.
+관리형 `semantic` 실행에서는 검수 에이전트가 Python이 만든 개별 후보 패킷부터 읽는다. 첫 검수는 `economy_high`로 한 번 수행한다. 숫자·수식·고유명사·평가조건처럼 중요한 미해결 구간은 `manage_run.py escalate`가 `model_input=true`, `kind=*packet`, 명시적 target, 16KiB 이하와 강의당 1회 제한을 모두 확인한 경우에만 그 패킷 하나를 `quality_high`로 재검수한다. 전체 전사 재호출이나 역할 단위 자동 승격은 하지 않는다.
 
-일부만 확인했으면 `partially_audio_verified`로 기록한다. 전체 녹음을 실제로 대조한 경우에만 `audio_verified`를 사용한다. 녹음이 없으면 `transcript_only`이며, 교안과 문맥으로 오탈자를 고쳐도 음성 검증으로 승격하지 않는다.
+원음을 듣지 않고 교안·문맥으로만 확인했으면 `reviewed`(`reviewed_against_audio=false`)로 기록한다. 일부 구간을 실제로 들었으면 `partially_audio_verified`, 전체 녹음을 실제로 대조한 경우에만 `audio_verified`를 사용한다. 녹음이 없으면 `transcript_only`이며, 교안과 문맥으로 오탈자를 고쳐도 음성 검증으로 승격하지 않는다.
 
 ## 8. 교안 정렬
 
@@ -167,4 +167,4 @@ python scripts/transcribe_batch.py <녹음_폴더_또는_파일들>
 python scripts/validate_transcript_package.py <전사본> --audio <녹음> --manifest <메타데이터>
 ```
 
-Python은 파일 존재, UTF-8, SRT·segments의 타임스탬프 순서, 반복 구간, 불확실성 표지, 메타데이터 구조를 검사한다. 음성이 정확히 받아 적혔는지, 교수의 설명이 중요한지, 수식이 문맥상 맞는지는 학습노트 작성 중 필요한 구간 확인과 요청된 검수가 판단한다.
+Python은 파일 존재, UTF-8, SRT의 타임스탬프 순서, 반복 구간, 불확실성 표지, 메타데이터 구조를 검사한다. 음성이 정확히 받아 적혔는지, 교수의 설명이 중요한지, 수식이 문맥상 맞는지는 학습노트 작성 중 필요한 구간 확인과 요청된 검수가 판단한다.

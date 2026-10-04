@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import build_study_note_pdf as builder  # noqa: E402
+from note_scope import markdown_composition  # noqa: E402
 
 try:  # reportlab·한글 글꼴이 없는 CI에서는 렌더 테스트만 건너뛴다.
     FONTS = None if builder.REPORTLAB_ERROR is not None else builder.resolve_fonts(None, None)
@@ -74,6 +75,65 @@ class PublicTextTests(unittest.TestCase):
             headless.write_text("본문만 있음\n", encoding="utf-8")
             builder.main([str(headless), "--output", str(Path(temporary) / "h.md"), "--course", "과목", "--session", "2차시"])
             self.assertTrue((Path(temporary) / "h.md").read_text(encoding="utf-8").startswith("# 과목 2차시 학습노트"))
+
+    def test_each_composed_part_drops_only_its_own_memo(self) -> None:
+        # 진도별 누적 원고에서 앞부분의 인계 메모 때문에 뒷부분 본문이 사라지면 안 된다.
+        first = "# 과목 학습노트\n\n첫 부분 본문.\n\n## 후속 역할 인계 메모\n\n- 검증 필요: 첫 부분\n"
+        second = "## 2. 이어지는 개념\n\n둘째 부분 본문.\n\n## 후속 역할 인계 메모\n\n- 검증 필요: 둘째 부분\n"
+        text = builder.public_text(markdown_composition([first, second]))
+        self.assertIn("첫 부분 본문.", text)
+        self.assertIn("## 2. 이어지는 개념", text)
+        self.assertIn("둘째 부분 본문.", text)
+        self.assertNotIn("인계 메모", text)
+        self.assertNotIn("검증 필요", text)
+        self.assertNotIn("gongbu:part", text)
+
+    def test_memo_phrase_in_sentence_or_code_block_is_kept(self) -> None:
+        source = (
+            "# 노트\n\n인계 메모 제목은 `## 후속 역할 인계 메모`로 쓴다.\n\n"
+            "```markdown\n## 후속 역할 인계 메모\n```\n\n끝 문단.\n"
+        )
+        text = builder.public_text(source)
+        self.assertIn("```markdown\n## 후속 역할 인계 메모\n```", text)
+        self.assertIn("끝 문단.", text)
+
+    def test_two_memos_without_part_boundary_stop_instead_of_dropping_text(self) -> None:
+        joined = SAMPLE + "\n## 2. 다음 부분\n\n사라지면 안 되는 본문.\n\n## 후속 역할 인계 메모\n\n둘째 메모\n"
+        with self.assertRaises(builder.HandoffMemoError):
+            builder.public_text(joined)
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "joined.md"
+            source.write_text(joined, encoding="utf-8")
+            output = Path(temporary) / "out.md"
+            code = builder.main([str(source), "--output", str(output), "--course", "과목", "--session", "1주차"])
+            self.assertEqual(2, code)
+            self.assertFalse(output.exists())
+
+    def test_output_extension_must_match_format(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "note_draft.md"
+            source.write_text(SAMPLE, encoding="utf-8")
+            # Markdown 글자가 .pdf 파일에 들어가거나 PDF가 엉뚱한 확장자로 저장되지 않는다.
+            pdf_named = Path(temporary) / "note.pdf"
+            code = builder.main([str(source), "--output", str(pdf_named), "--format", "md", "--course", "과목", "--session", "1차시"])
+            self.assertEqual(2, code)
+            self.assertFalse(pdf_named.exists())
+            odd = Path(temporary) / "note.markdown"
+            self.assertEqual(2, builder.main([str(source), "--output", str(odd), "--course", "과목", "--session", "1차시"]))
+            self.assertFalse(odd.exists())
+
+    def test_faithful_pdf_refuses_markup_it_cannot_draw(self) -> None:
+        # 기존 PDF 빌더는 수식·이미지를 그리지 못하므로 원문이 찍힌 PDF를 만들지 않는다.
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "draft.md"
+            output = Path(temporary) / "note.pdf"
+            for body in ("# 노트\n\n행렬 성분 $a_{ij}$를 쓴다.\n", "# 노트\n\n![원본](slide.png)\n"):
+                source.write_text(body, encoding="utf-8")
+                code = builder.main([str(source), "--output", str(output), "--course", "과목", "--session", "1차시"])
+                self.assertEqual(2, code)
+                self.assertFalse(output.exists())
+        # 가격 표기와 코드 안의 $는 수식으로 보지 않는다.
+        self.assertEqual([], builder.unsupported_pdf_markup("가격은 $5다.\n\n```sh\necho $HOME_DIR $X_Y\n```\n`$a_b$`\n"))
 
     def test_inline_markup_keeps_code_and_bold(self) -> None:
         rendered = builder.inline_markup("**정의**: 미디어는 `매개체`다 — 끝")

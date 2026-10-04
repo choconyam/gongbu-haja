@@ -142,6 +142,9 @@ class ApplyTranscriptCorrectionsTests(unittest.TestCase):
             self.assertEqual([1], reviewed["review"]["unresolved_segment_ids"])
             audit = json.loads(Path(result["correction_audit"]).read_text(encoding="utf-8"))
             self.assertEqual("unverified", audit["decisions"][0]["verification"])
+            # 노트 작성자가 읽는 Markdown에는 미해결 구간이 표시된다.
+            markdown = Path(result["transcript_reviewed"]).read_text(encoding="utf-8")
+            self.assertIn("공진 주파수가 십이 헤르츠다 [전사 불명확]", markdown)
 
     def test_rejects_unverified_or_missing_verification_for_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

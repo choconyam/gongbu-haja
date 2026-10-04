@@ -15,4 +15,4 @@ Do not add outside knowledge or rewrite the whole note. Classify each source uni
 Use excluded only with a specific reason. Use unresolved only when the uncertainty is visibly marked at a concrete note location.
 Return a study_note_source_coverage JSON report with reviewer_profile=review_high. Report missing, distorted, weakened, or duplicated course content as failures.
 Apply any necessary localized source-faithful patches and recheck only their affected locations within this one final-review call; never request a second whole-note pass.
-If a meaning conflict cannot be settled from the bounded evidence, request one exact evidence packet for the quality_high profile instead of guessing.
+If a meaning conflict cannot be settled from the bounded evidence, ask the manager to pass one exact evidence packet through manage_run.py escalate (it returns the quality_xhigh contract) instead of guessing.

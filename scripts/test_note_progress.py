@@ -10,8 +10,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts import manage_run as run, prepare_source_map as prep
-from scripts.note_scope import tex_part_input, validate_map_scope, validate_scope
+from scripts import build_study_note_pdf as builder, manage_run as run, prepare_source_map as prep
+from scripts.note_scope import MARKDOWN_PART_BOUNDARY, tex_part_input, validate_map_scope, validate_scope
 
 
 def render_progress_fixture(directory):
@@ -92,13 +92,13 @@ class NoteProgressTests(unittest.TestCase):
             arguments += ["--classify", classification]
         return Path(self.call(*arguments).strip())
 
-    def complete(self, state, extracted=()):
+    def complete(self, state, extracted=(), body_text=None):
         payload, screening = prep.prepare(state, [], list(extracted))
         paths = prep.write_outputs(state.parent / "sources", payload, screening)
         source_map = Path(paths["source_map"])
         mode = run.read_state(state)["note_mode"]
         body = state.parent / ("body.tex" if mode == "deep" else "body.md")
-        body.write_text("\\[1+1=2\\]\n" if mode == "deep" else "본문\n", encoding="utf-8")
+        body.write_text(body_text or ("\\[1+1=2\\]\n" if mode == "deep" else "본문\n"), encoding="utf-8")
         # 각 역할의 실제 산출물 기록과 독립 검수 완료 게이트를 통과시키는 상태 테스트 fixture.
         for role in run.ROLE_ORDER:
             entry = run.read_state(state)["roles"][role]
@@ -241,8 +241,26 @@ class NoteProgressTests(unittest.TestCase):
             self.call("compose", str(second), "--output", str(first_body), "--force")
         combined = self.root / "combined.md"
         self.call("compose", str(second), "--output", str(combined))
-        self.assertEqual(first_body.read_text().rstrip() + "\n\n" + second_body.read_text().rstrip() + "\n",
+        boundary = f"\n\n{MARKDOWN_PART_BOUNDARY}\n\n"
+        self.assertEqual(first_body.read_text().rstrip() + boundary + second_body.read_text().rstrip() + "\n",
                          combined.read_text())
+
+    def test_markdown_parts_with_handoff_memos_all_reach_the_student_note(self):
+        # 각 부분 끝의 인계 메모는 그 부분에서만 지워지고, 뒷부분 본문은 학생용 노트에 남는다.
+        first = self.init("memo1", [1, 2], mode="faithful")
+        self.complete(first, body_text="첫 부분 본문\n\n## 후속 역할 인계 메모\n\n- 첫 부분 확인 필요\n")
+        second = self.init("memo2", [3, 4], first, mode="faithful")
+        self.complete(second, body_text="둘째 부분 본문\n\n## 후속 역할 인계 메모\n\n- 둘째 부분 확인 필요\n")
+        combined = self.root / "combined.md"
+        self.call("compose", str(second), "--output", str(combined))
+        student = self.root / "student.md"
+        with contextlib.redirect_stdout(io.StringIO()):
+            code = builder.main([str(combined), "--output", str(student), "--course", "과목", "--session", "1주차"])
+        self.assertEqual(0, code)
+        text = student.read_text(encoding="utf-8")
+        self.assertIn("첫 부분 본문", text)
+        self.assertIn("둘째 부분 본문", text)
+        self.assertNotIn("확인 필요", text)
 
     def test_invalid_scopes_fail_before_state_creation(self):
         for source, selector in (("../secret.txt", {"all": True}), ("a.txt", {"pages": [0, 1]}),

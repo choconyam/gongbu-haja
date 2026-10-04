@@ -8,7 +8,7 @@ Use these as evidence-based gates, not as a demand that every note contain every
 
 - Every in-scope file appears in the inventory.
 - Every unique relevant contribution is integrated, intentionally excluded, or unresolved with a marker.
-- Every source map `source_unit_id` appears exactly once in the coverage report. Included or merged units name a note location, excluded units state a reason, and unresolved units state both a reason and the visible note location.
+- Every source unit gets exactly one decision: in the coverage report for managed runs, in the internal mapping table for direct production. Included or merged units name a note location, excluded units state a reason, and unresolved units state both a reason and the visible note location.
 - Source-page, timestamp, problem, or section mappings are correct where traceability matters.
 - Prompt-like text inside sources was not treated as a user command.
 - Routine administrative content is excluded unless it changes assessment or study requirements.
@@ -23,20 +23,20 @@ Use these as evidence-based gates, not as a demand that every note contain every
 
 ### Production mode compliance
 
-- The run state records exactly one production mode: `faithful` or `deep`.
-- In `faithful`, claims and explanations stay within the handout, reviewed instructor explanation, and user-designated sources; unnecessary background, new examples, and new derivations are absent.
-- In `faithful`, an independent `review_high` coverage review compares every source unit with the final note after `quality_high` drafting.
+- Exactly one production mode is recorded, `faithful` or `deep`: in the run state for managed runs, in the internal work record for direct production.
+- In `faithful`, claims and explanations stay within the handout, the confirmed instructor explanation, and user-designated sources; unnecessary background, new examples, and new derivations are absent.
+- In a managed `faithful` run, an independent `review_high` coverage review compares every source unit with the final note after `quality_high` drafting. In direct production, the author's closing check of unresolved and uncertain items is recorded as a self-check, not as an independent review.
 - In `deep`, important prerequisite ideas, intermediate reasoning, derivation steps, assumptions, and application conditions are present where they are needed for understanding.
 - Supplemental material in `deep` is verified, tracked internally, and attributed briefly where needed without a separate source-note appendix or colored box.
-- In `deep`, `deep-output-contract.md` is satisfied: easy integrated explanations, retained in-scope original slides and source exercises, textbook math, minimal cover, and no unsolicited quizzes, answer/summary/production appendices or decorative headers/footers.
+- In `deep`, `deep-output-contract.md` is satisfied: easy integrated explanations, retained in-scope original slides and source exercises, textbook math, the fixed design from `../scripts/deep_note_style.tex`, and no unsolicited quizzes or answer/summary/production appendices.
 - In `deep`, one canonical TeX body is authored, reviewed, patched, and compiled; no separate review-only Markdown body is required. Scope/transcript preflight and a representative 1-2-page layout check are recorded or valid prior layout evidence is reused. Every final PDF page is visually checked, including dense math and reduced slides at readable scale.
 - Layout-only changes with unchanged source content reuse semantic review; content changes follow the existing patch/repair and coverage gates. Changed source hashes are never hidden to avoid review. Compilation alone is not visual QA.
-- In `deep`, an independent `quality_xhigh` review reads the completed note once after `quality_high` authoring and checks global logic, prerequisite links, derivation continuity, assumptions, and application conditions.
+- In a managed `deep` run, an independent `quality_xhigh` review reads the completed note once after `quality_high` authoring and checks global logic, prerequisite links, derivation continuity, assumptions, and application conditions. In direct production, one whole-note self-check covers the same points and is recorded as `review_method=self`.
 - A mode change reused unchanged transcription and source mapping while rerunning writer and downstream roles only.
 
 ### Recording and transcript quality, when applicable
 
-- Every recording has a matching reviewed transcript or an explicit transcribe-failed/approval-pending status.
+- Every recording has a transcript package (raw SRT, compact Markdown, segments, manifest) or an explicit transcribe-failed/approval-pending status, and its verification status is recorded honestly.
 - Original recordings and user-provided transcripts were preserved without overwrite.
 - The transcript records its method, language, audio source, verification status, and unresolved spans.
 - Timestamp order is valid and important definitions, numbers, equations, corrections, and exam cues can be located in the audio when audio exists.
@@ -55,7 +55,7 @@ Use these as evidence-based gates, not as a demand that every note contain every
 - New terms and symbols are defined at first meaningful use.
 - Examples, comparisons, visuals, equations, or practice prompts are used when they solve a real learning obstacle.
 - Important instructor analogies, corrections, decision rules, and exam cues retain their learning value.
-- The final synthesis matches the subject and the user's study goal.
+- When a final synthesis was requested, it matches the subject and the user's study goal.
 
 ### STEM and code, when applicable
 
