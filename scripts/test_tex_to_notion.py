@@ -105,6 +105,32 @@ class ConvertTexTests(unittest.TestCase):
         bullets = [block for block in self.note.blocks if block["type"] == "bulleted_list_item"]
         self.assertEqual(2, len(bullets))
 
+    def test_matrix_inside_inline_math_stays_in_the_paragraph(self) -> None:
+        note = Path(self.temp.name) / "inline.tex"
+        note.write_text("\\documentclass{article}\n\\begin{document}\n\\gongbucover{과목}{01 · 주제}{요약}\n"
+                        "교안의 \\(\\left[\\begin{smallmatrix}2&1\\\\0&4\\end{smallmatrix}\\right]\\)은 삼각행렬이고 "
+                        "$\\begin{pmatrix}1\\\\2\\end{pmatrix}$도 있다.\n\\end{document}\n", encoding="utf-8")
+        converted = tn.convert_tex(note)
+        self.assertEqual([], converted.problems)
+        self.assertEqual(["paragraph"], [block["type"] for block in converted.blocks])
+        expressions = [item["equation"]["expression"] for item in converted.blocks[0]["paragraph"]["rich_text"]
+                       if item["type"] == "equation"]
+        self.assertEqual([r"\left[\begin{smallmatrix}2&1\\0&4\end{smallmatrix}\right]",
+                          r"\begin{pmatrix}1\\2\end{pmatrix}"], expressions)
+
+    def test_math_inside_text_inside_inline_math_is_kept_whole(self) -> None:
+        items = tn.inline_items(r"열공간 \(C(A)=\operatorname{span}\{\text{\(A\)의 열}\}\)이고 $x=\text{$y$일 때}$다.",
+                                {"problems": []})
+        expressions = [item["equation"]["expression"] for item in items if item["type"] == "equation"]
+        self.assertEqual([r"C(A)=\operatorname{span}\{\text{\(A\)의 열}\}", r"x=\text{$y$일 때}"], expressions)
+        self.assertEqual("열공간 이고 다.", "".join(item["text"]["content"] for item in items if item["type"] == "text"))
+
+    def test_space_macro_in_slide_path_follows_tex(self) -> None:
+        note = Path(self.temp.name) / "spaces.tex"
+        note.write_text("\\documentclass{article}\n\\newcommand{\\sourcepdf}{../a\\space\\space b.pdf}\n"
+                        "\\begin{document}\n\\gongbucover{과목}{01 · 주제}{요약}\n\\end{document}\n", encoding="utf-8")
+        self.assertEqual("a  b.pdf", tn.convert_tex(note).slide_pdf.name)
+
     def test_input_parts_are_inlined(self) -> None:
         part = Path(self.temp.name) / "part01.tex"
         part.write_text("\\section{부분}\n본문이다.\n", encoding="utf-8")

@@ -332,7 +332,7 @@ def inline_items(tex: str, context: dict[str, Any], style: dict[str, bool] | Non
     style = style or {}
     items: list[dict[str, Any]] = []
     position = 0
-    pattern = re.compile(r"\$(?P<dollar>(?:\\\$|[^$])+?)\$|\\\((?P<paren>.+?)\\\)"
+    pattern = re.compile(r"(?P<math>(?<!\\)\$|\\\()"
                          r"|\\(?P<command>textbf|emph|textit|texttt|underline|href|url|footnote|eqref|ref|mbox|text|textsf)\s*(?=\{)",
                          re.S)
 
@@ -351,13 +351,17 @@ def inline_items(tex: str, context: dict[str, Any], style: dict[str, bool] | Non
             plain(tex[position:])
             break
         plain(tex[position:match.start()])
-        if match.group("dollar") is not None or match.group("paren") is not None:
-            expression = katex_arrays((match.group("dollar") or match.group("paren")).strip())
+        if match.group("math"):
+            closer = "$" if match.group("math") == "$" else "\\)"
+            end = math_end(tex, match.end(), closer)
+            if end < 0:
+                raise ValueError(f"닫히지 않은 인라인 수식이 있습니다: {tex[match.start():match.start() + 40]}")
+            expression = katex_arrays(tex[match.end():end].strip())
             item = {"type": "equation", "equation": {"expression": expression}}
             if style:
                 item["annotations"] = dict(style)
             items.append(item)
-            position = match.end()
+            position = end + len(closer)
             continue
         command = match.group("command")
         argument, position = braced(tex, match.end())
@@ -434,6 +438,42 @@ BLOCK_RE = re.compile(
     r"|\\(?:sourceslide|continuationslide)\s*(?:\[[^\]]*\])?\s*\{(?P<slide>\d+)\}"
     r"|\\item\b"
 )
+# 독립 수식(`$$…$$`, `\[…\]`)도 한 덩어리로 읽어야 `$`의 짝이 어긋나지 않는다.
+MATH_OPEN_RE = re.compile(r"\$\$|\\\[|(?<!\\)\$|\\\(")
+MATH_CLOSE = {"$$": "$$", "\\[": "\\]", "$": "$", "\\(": "\\)"}
+
+
+def math_end(tex: str, index: int, closer: str) -> int:
+    """index부터 중괄호 밖에서 처음 나오는 closer의 위치(없으면 -1).
+
+    `\\text{\\(A\\)의 열}`처럼 수식 안 글자에 든 수식은 중괄호 안이라 건너뛴다.
+    """
+    depth = 0
+    while index < len(tex):
+        if depth == 0 and tex.startswith(closer, index):
+            return index
+        char = tex[index]
+        if char == "\\":
+            index += 2
+            continue
+        depth += {"{": 1, "}": -1}.get(char, 0)
+        index += 1
+    return -1
+
+
+def inline_math_spans(tex: str) -> list[tuple[int, int]]:
+    """문장 속 인라인 수식의 자리. 그 안의 `\\begin{smallmatrix}` 같은 환경은 문단을 끊는 블록이 아니다."""
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while match := MATH_OPEN_RE.search(tex, index):
+        closer = MATH_CLOSE[match.group()]
+        end = math_end(tex, match.end(), closer)
+        if end < 0:
+            break
+        if match.group() in ("$", "\\("):
+            spans.append((match.start(), end + len(closer)))
+        index = end + len(closer)
+    return spans
 
 
 def environment_body(tex: str, name: str, start: int) -> tuple[str, int]:
@@ -454,8 +494,11 @@ def environment_body(tex: str, name: str, start: int) -> tuple[str, int]:
 def convert_body(tex: str, context: dict[str, Any]) -> list[dict[str, Any]]:
     blocks: list[dict[str, Any]] = []
     position = 0
+    spans = inline_math_spans(tex)
     while position < len(tex):
         match = BLOCK_RE.search(tex, position)
+        while match and (inside := next((span for span in spans if span[0] < match.start() < span[1]), None)):
+            match = BLOCK_RE.search(tex, inside[1])  # 인라인 수식 안은 건너뛴다
         if not match:
             blocks.extend(paragraphs(tex[position:], context))
             break
@@ -564,7 +607,7 @@ def convert_tex(path: Path) -> TexNote:
     slide_pdf = None
     source = re.search(r"\\newcommand\s*\{?\\sourcepdf\}?\s*\{(?:\\detokenize\s*\{)?([^{}]+)\}", raw)
     if source:
-        slide_pdf = Path(source.group(1).strip().replace("\\space", " "))
+        slide_pdf = Path(re.sub(r"\\space\s*", " ", source.group(1).strip()))  # TeX처럼 \space 뒤 띄어쓰기는 버린다
         if not slide_pdf.is_absolute():
             slide_pdf = (path.parent / slide_pdf).resolve()
     body = inline_input(body, path.parent)
