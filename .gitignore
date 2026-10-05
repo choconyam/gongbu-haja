@@ -43,3 +43,6 @@ models/
 *.out
 *.synctex.gz
 *.toc
+
+# 개발 로그(로컬 전용, 저장소 관리자만)
+/DEVLOG.md
