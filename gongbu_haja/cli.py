@@ -95,11 +95,11 @@ USAGE = f"""gongbu {__version__} — 과목 폴더에서 쓰는 gongbu-haja 명�
 
 노션 (선택 설치 notion: keyring)
   notion login           노션 API 토큰을 OS 비밀번호 보관소에 저장한다 (사용자가 자기 터미널에서 직접)
-  notion setup <상위 페이지 링크> --course <과목명>
-                         과목 페이지와 "차시별 노트" 표를 만든다
-  notion check <노트.md>  네트워크 없이 노션 블록으로 바꿔 검사한다
-  notion push <노트.md> [--dry-run] [--handout "교안 01·02"]
-                         과목 표에 노트 한 줄을 올린다. 바뀐 노트만 다시 올리고 노션에서 고친 페이지는 덮어쓰지 않는다
+  notion setup <상위 페이지 링크> --course <과목명> [--slides yes|no]
+                         과목 페이지를 만든다. 차시 노트는 그 아래 페이지로 올라간다
+  notion check <노트.md|원고.tex>  네트워크 없이 노션 블록으로 바꿔 검사한다(.tex는 심화 이해형)
+  notion push <노트.md|원고.tex> [--dry-run] [--handout "교안 01·02"]
+                         과목 페이지 아래에 노트 한 페이지를 올린다. 바뀐 노트는 같은 페이지에서 내용만 바꾸고, 노션에서 고친 페이지는 덮어쓰지 않는다
 
 검수 도구
   prepare-sources ...    자료 충실형 무손실 원문 묶음·기계적 전사 검사 (모델 호출 없음)

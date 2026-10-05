@@ -56,11 +56,12 @@ PARENT = "https://www.notion.so/workspace/공부하자-0123456789abcdef012345678
 
 
 class FakeClient:
-    """요청을 기록하고 노션처럼 답하는 가짜 클라이언트."""
+    """요청을 기록하고 노션처럼 답하는 가짜 클라이언트. 페이지마다 붙은 블록도 기억한다."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict | None]] = []
         self.pages: dict[str, dict] = {"01234567-89ab-cdef-0123-456789abcdef": {"id": "parent", "public_url": None}}
+        self.blocks: dict[str, list[dict]] = {}
         self.clock = 0
         self.created = 0
         self.fail_on_append = False
@@ -69,39 +70,73 @@ class FakeClient:
         self.clock += 1
         return f"2026-10-05T00:{self.clock:02d}:00.000Z"
 
+    def owner(self, block_id: str) -> tuple[str, dict]:
+        for page_id, items in self.blocks.items():
+            for block in items:
+                if block["id"] == block_id:
+                    return page_id, block
+        raise pn.NotionError("없음", 404, "object_not_found")
+
     def request(self, method: str, path: str, body: dict | None = None) -> dict:
         body = copy.deepcopy(body)
         self.calls.append((method, path, copy.deepcopy(body)))
-        if method == "GET" and path.startswith("/pages/"):
-            page = self.pages.get(path.split("/")[2])
+        route = path.split("?")[0]
+        target = route.split("/")[2] if route.count("/") >= 2 else ""
+        if method == "GET" and route.startswith("/pages/"):
+            page = self.pages.get(target)
             if page is None:
                 raise pn.NotionError("없음", 404, "object_not_found")
             return page
-        if method == "POST" and path == "/pages":
+        if method == "GET" and route.endswith("/children"):
+            limit = int(path.split("page_size=")[1].split("&")[0]) if "page_size=" in path else 100
+            return {"results": copy.deepcopy(self.blocks.get(target, [])[:limit]), "has_more": False}
+        if method == "POST" and route == "/pages":
             self.created += 1
             page_id = f"page-{self.created}"
             page = {"id": page_id, "url": f"https://www.notion.so/{page_id}", "in_trash": False,
-                    "last_edited_time": self.stamp(), "properties": body["properties"], "parent": body["parent"]}
+                    "last_edited_time": self.stamp(), "properties": body["properties"], "parent": body["parent"],
+                    "icon": body.get("icon")}
             self.pages[page_id] = page
             return page
-        if method == "POST" and path == "/databases":
-            return {"id": "db-1", "data_sources": [{"id": "ds-1", "name": pn.TABLE_TITLE}]}
-        if method == "PATCH" and path.startswith("/blocks/"):
+        if method == "POST" and route == "/file_uploads":
+            self.created += 1
+            return {"id": f"upload-{self.created}", "status": "pending"}
+        if method == "PATCH" and route.endswith("/children"):
             if self.fail_on_append:
                 raise pn.NotionError("서버 오류", 500, "internal_server_error")
-            self.pages[path.split("/")[2]]["last_edited_time"] = self.stamp()
+            for block in body["children"]:
+                self.created += 1
+                self.blocks.setdefault(target, []).append({**block, "id": f"block-{self.created}"})
+            self.pages[target]["last_edited_time"] = self.stamp()
             return {"results": body["children"]}
-        if method == "PATCH" and path.startswith("/pages/"):
-            page = self.pages[path.split("/")[2]]
+        if method in ("PATCH", "DELETE") and route.startswith("/blocks/"):
+            page_id, block = self.owner(target)
+            if method == "DELETE":
+                self.blocks[page_id].remove(block)
+            else:
+                block.update(body)
+            self.pages[page_id]["last_edited_time"] = self.stamp()
+            return block
+        if method == "PATCH" and route.startswith("/pages/"):
+            page = self.pages[target]
             if "in_trash" in body:
                 page["in_trash"] = body["in_trash"]
+            if "icon" in body:
+                page["icon"] = body["icon"]
             page.setdefault("properties", {}).update(body.get("properties", {}))
             page["last_edited_time"] = self.stamp()
             return page
         raise AssertionError(f"예상하지 못한 요청: {method} {path}")
 
+    def send_file(self, upload_id: str, filename: str, data: bytes, content_type: str) -> dict:
+        self.calls.append(("SEND", f"/file_uploads/{upload_id}/send", {"filename": filename, "bytes": len(data)}))
+        return {"id": upload_id, "status": "uploaded"}
+
     def count(self, method: str, prefix: str) -> int:
         return sum(1 for call in self.calls if call[0] == method and call[1].startswith(prefix))
+
+    def title(self, page_id: str) -> str:
+        return self.pages[page_id]["properties"]["title"]["title"][0]["text"]["content"]
 
 
 def texts(block: dict) -> str:
@@ -193,17 +228,33 @@ class FlowTests(unittest.TestCase):
         self.last_action = plan.action
         return pn.push(self.client, self.course, plan, state, "2026-10-05")
 
-    def test_setup_creates_course_page_and_table_once(self) -> None:
+    def test_setup_creates_course_page_once(self) -> None:
         state = pn.setup(self.client, self.course, PARENT, "과목A")
-        database = next(body for method, path, body in self.client.calls if path == "/databases")
-        self.assertEqual({"type": "page_id", "page_id": state["course_page_id"]}, database["parent"])
-        self.assertTrue(database["is_inline"])
-        self.assertEqual({"차시", "내용", "모드", "교안", "올린 날"}, set(database["initial_data_source"]["properties"]))
-        self.assertEqual("ds-1", state["data_source_id"])
+        course = next(body for method, path, body in self.client.calls if method == "POST" and path == "/pages")
+        self.assertEqual({"type": "page_id", "page_id": "01234567-89ab-cdef-0123-456789abcdef"}, course["parent"])
+        self.assertEqual("과목A", course["properties"]["title"]["title"][0]["text"]["content"])
+        self.assertEqual(pn.STATE_VERSION, state["version"])
+        self.assertNotIn("data_source_id", state)
         self.assertTrue(pn.state_path(self.course).is_file())
         calls = len(self.client.calls)
         pn.setup(self.client, self.course, PARENT, "과목A")  # 다시 해도 새로 만들지 않는다
         self.assertEqual(0, sum(1 for method, path, _ in self.client.calls[calls:] if method == "POST"))
+
+    def test_setup_moves_old_table_course_to_child_pages(self) -> None:
+        state = pn.setup(self.client, self.course, PARENT, "과목A")
+        old = {**state, "version": 1, "database_id": "db-1", "data_source_id": "ds-1",
+               "notes": {"1주차/노트.md": {"page_id": "row-1", "content_sha256": "x"}}}
+        pn.save_state(self.course, old)
+        with self.assertRaises(pn.NotionError):  # 표의 줄을 차시 페이지로 고치지 않는다
+            pn.plan_push(self.client, self.course, self.note, pn.load_state(self.course))
+        calls = len(self.client.calls)
+        upgraded = pn.setup(self.client, self.course, PARENT, "과목A")
+        self.assertEqual(0, sum(1 for method, _, _ in self.client.calls[calls:] if method == "POST"))
+        self.assertEqual(state["course_page_id"], upgraded["course_page_id"])
+        self.assertEqual({}, upgraded["notes"])
+        self.assertFalse({"database_id", "data_source_id"} & set(pn.load_state(self.course)))
+        self.push()
+        self.assertEqual("create", self.last_action)
 
     def test_setup_refuses_public_parent_page(self) -> None:
         self.client.pages["01234567-89ab-cdef-0123-456789abcdef"]["public_url"] = "https://notion.site/x"
@@ -211,36 +262,51 @@ class FlowTests(unittest.TestCase):
             pn.setup(self.client, self.course, PARENT, "과목A")
         self.assertFalse(pn.state_path(self.course).exists())
 
-    def test_first_push_creates_row_in_data_source_and_records_state(self) -> None:
-        pn.setup(self.client, self.course, PARENT, "과목A")
+    def test_first_push_creates_child_page_of_course_page(self) -> None:
+        state = pn.setup(self.client, self.course, PARENT, "과목A")
         record = self.push()
-        row = next(body for method, path, body in self.client.calls if path == "/pages" and body["parent"]["type"] == "data_source_id")
-        self.assertEqual("ds-1", row["parent"]["data_source_id"])
-        self.assertEqual("업로드 중 · 1주차 · 미디어의 이해", row["properties"]["차시"]["title"][0]["text"]["content"])
-        self.assertEqual("자료 충실형", row["properties"]["모드"]["select"]["name"])
-        self.assertEqual("📗", row["icon"]["emoji"])
-        self.assertEqual("1주차 · 미디어의 이해", self.client.pages[record["page_id"]]["properties"]["차시"]["title"][0]["text"]["content"])
+        page = [body for method, path, body in self.client.calls if method == "POST" and path == "/pages"][-1]
+        self.assertEqual({"type": "page_id", "page_id": state["course_page_id"]}, page["parent"])
+        self.assertEqual("업로드 중 · 1주차 · 미디어의 이해", page["properties"]["title"]["title"][0]["text"]["content"])
+        self.assertEqual("📗", page["icon"]["emoji"])
+        self.assertEqual("1주차 · 미디어의 이해", self.client.title(record["page_id"]))
+        header = self.client.blocks[record["page_id"]][0]
+        self.assertEqual("gray", header["paragraph"]["color"])
+        self.assertEqual("자료 충실형 · 미디어의 개념 · 방송의 탄생", texts(header))
         saved = pn.load_state(self.course)["notes"]["1주차/노트.md"]
         self.assertEqual(record["last_edited_time"], saved["last_edited_time"])
 
-    def test_unchanged_note_is_skipped_and_property_change_only_patches(self) -> None:
+    def test_unchanged_note_is_skipped_and_header_change_only_patches(self) -> None:
         pn.setup(self.client, self.course, PARENT, "과목A")
-        self.push()
+        record = self.push()
         posts = self.client.count("POST", "/pages")
         self.push()
         self.assertEqual("skip", self.last_action)
         self.push(handout="교안 01·02")
         self.assertEqual("properties", self.last_action)
         self.assertEqual(posts, self.client.count("POST", "/pages"))
+        self.assertEqual(0, self.client.count("DELETE", "/blocks/"))
+        self.assertEqual("자료 충실형 · 교안 01·02 · 미디어의 개념 · 방송의 탄생", texts(self.client.blocks[record["page_id"]][0]))
+        self.push(handout="교안 01·02")
+        self.assertEqual("skip", self.last_action)
 
-    def test_changed_note_replaces_row_and_trashes_untouched_old_one(self) -> None:
+    def test_changed_note_replaces_content_of_the_same_page(self) -> None:
         pn.setup(self.client, self.course, PARENT, "과목A")
         first = self.push()
+        old_ids = [block["id"] for block in self.client.blocks[first["page_id"]]]
+        posts = self.client.count("POST", "/pages")
         self.note.write_text(NOTE.replace("첫째", "첫째 항목"), encoding="utf-8")
         second = self.push()
         self.assertEqual("replace", self.last_action)
-        self.assertNotEqual(first["page_id"], second["page_id"])
-        self.assertTrue(self.client.pages[first["page_id"]]["in_trash"])
+        self.assertEqual(first["page_id"], second["page_id"])  # 과목 페이지 안의 자리와 링크가 그대로다
+        self.assertEqual(posts, self.client.count("POST", "/pages"))
+        self.assertEqual(len(old_ids), self.client.count("DELETE", "/blocks/"))
+        current = self.client.blocks[first["page_id"]]
+        self.assertFalse({block["id"] for block in current} & set(old_ids))
+        self.assertIn("첫째 항목", json.dumps(current, ensure_ascii=False))
+        self.assertEqual("1주차 · 미디어의 이해", self.client.title(first["page_id"]))
+        self.push()
+        self.assertEqual("skip", self.last_action)
 
     def test_page_edited_in_notion_is_never_overwritten(self) -> None:
         pn.setup(self.client, self.course, PARENT, "과목A")
@@ -250,6 +316,7 @@ class FlowTests(unittest.TestCase):
         second = self.push()
         self.assertEqual("revision", self.last_action)
         self.assertFalse(self.client.pages[first["page_id"]]["in_trash"])
+        self.assertEqual(0, self.client.count("DELETE", "/blocks/"))
         self.assertEqual("1주차 · 미디어의 이해 (수정본 2)", second["title"])
 
     def test_deleted_page_is_recreated(self) -> None:
@@ -261,13 +328,28 @@ class FlowTests(unittest.TestCase):
         self.assertNotEqual(first["page_id"], second["page_id"])
 
     def test_failed_upload_trashes_partial_page_and_keeps_state(self) -> None:
-        pn.setup(self.client, self.course, PARENT, "과목A")
+        state = pn.setup(self.client, self.course, PARENT, "과목A")
         self.client.fail_on_append = True
         with self.assertRaises(pn.NotionError):
             self.push()
-        partial = [page for page in self.client.pages.values() if page.get("parent", {}).get("type") == "data_source_id"]
+        partial = [page for page in self.client.pages.values()
+                   if page.get("parent", {}).get("page_id") == state["course_page_id"]]
         self.assertTrue(partial and all(page["in_trash"] for page in partial))
         self.assertEqual({}, pn.load_state(self.course).get("notes"))
+
+    def test_failed_replace_keeps_page_and_retries_without_mistaking_it_for_an_edit(self) -> None:
+        pn.setup(self.client, self.course, PARENT, "과목A")
+        first = self.push()
+        self.note.write_text(NOTE.replace("첫째", "첫째 항목"), encoding="utf-8")
+        self.client.fail_on_append = True
+        with self.assertRaises(pn.NotionError):
+            self.push()
+        self.assertFalse(self.client.pages[first["page_id"]]["in_trash"])
+        self.client.fail_on_append = False
+        second = self.push()
+        self.assertEqual("replace", self.last_action)
+        self.assertEqual(first["page_id"], second["page_id"])
+        self.assertEqual("1주차 · 미디어의 이해", self.client.title(first["page_id"]))
 
     def test_conversion_errors_stop_before_any_request(self) -> None:
         pn.setup(self.client, self.course, PARENT, "과목A")
@@ -276,6 +358,96 @@ class FlowTests(unittest.TestCase):
         with self.assertRaises(pn.NotionError):
             self.push()
         self.assertEqual(calls, len(self.client.calls))
+
+
+DEEP_TEX = r"""\documentclass{article}
+\newcommand{\sourcepdf}{\detokenize{slides.pdf}}
+\begin{document}
+\gongbucover{일반물리학1}{3장 벡터}{벡터와 그 연산}
+\section{벡터}
+\sourceslide{2}
+벡터 $\vec A$를 쓴다.
+\begin{equation}
+\vec C = \vec A + \vec B
+\end{equation}
+\sourceslide{5}
+\sourceslide{2}
+\end{document}
+"""
+
+
+class DeepNoteTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.course = Path(self.temp.name)
+        self.note = self.course / "03 학습노트.tex"
+        self.note.write_text(DEEP_TEX, encoding="utf-8")
+        (self.course / "slides.pdf").write_bytes(b"%PDF-1.4 fake")
+        self.client = FakeClient()
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def push(self, slides: bool) -> dict:
+        pn.setup(self.client, self.course, PARENT, "일반물리학1", slides)
+        state = pn.load_state(self.course)
+        plan = pn.plan_push(self.client, self.course, self.note, state)
+        with patch.object(pn, "render_slide", return_value=(b"\x89PNG fake", "image/png")) as render:
+            record = pn.push(self.client, self.course, plan, state, "2026-10-05")
+        self.render_calls = render.call_args_list
+        self.plan = plan
+        return record
+
+    def appended_blocks(self) -> list[dict]:
+        return [block for method, path, body in self.client.calls if method == "PATCH" and path.endswith("/children")
+                for block in body["children"]]
+
+    def test_slides_are_uploaded_once_per_page_and_attached(self) -> None:
+        self.push(slides=True)
+        self.assertEqual([2, 5], [call.args[1] for call in self.render_calls])
+        self.assertEqual(2, self.client.count("POST", "/file_uploads"))
+        images = [block["image"] for block in self.appended_blocks() if block["type"] == "image"]
+        self.assertEqual(3, len(images))
+        self.assertTrue(all(image["file_upload"]["id"].startswith("upload-") for image in images))
+        page = [body for method, path, body in self.client.calls if method == "POST" and path == "/pages"][-1]
+        self.assertEqual("📘", page["icon"]["emoji"])
+        self.assertEqual("업로드 중 · 3장 벡터", page["properties"]["title"]["title"][0]["text"]["content"])
+        self.assertEqual("심화 이해형 · 교안 p.2–5 · 벡터와 그 연산", texts(self.appended_blocks()[0]))
+
+    def test_slides_off_leaves_only_captions(self) -> None:
+        self.push(slides=False)
+        self.assertEqual(0, self.client.count("POST", "/file_uploads"))
+        blocks = self.appended_blocks()
+        self.assertFalse(any(block["type"] == "image" for block in blocks))
+        self.assertIn("원본 PDF p.5", json.dumps(blocks, ensure_ascii=False))
+
+    def test_missing_slide_pdf_stops_before_requests(self) -> None:
+        (self.course / "slides.pdf").unlink()
+        pn.setup(self.client, self.course, PARENT, "일반물리학1", True)
+        calls = len(self.client.calls)
+        with self.assertRaises(pn.NotionError):
+            pn.plan_push(self.client, self.course, self.note, pn.load_state(self.course))
+        self.assertEqual(calls, len(self.client.calls))
+
+    def test_render_slide_draws_png_with_gray_border(self) -> None:
+        try:
+            import pypdfium2  # noqa: F401
+            from PIL import Image
+            from reportlab.pdfgen.canvas import Canvas
+        except ImportError:
+            self.skipTest("pypdfium2·Pillow·reportlab이 필요하다")
+        pdf = self.course / "real.pdf"
+        canvas = Canvas(str(pdf), pagesize=(453.5, 283.5))  # 작은 Beamer 판형도 같은 폭으로 그린다
+        canvas.drawString(100, 140, "slide")
+        canvas.showPage()
+        canvas.save()
+        data, content_type = pn.render_slide(pdf, 1)
+        self.assertEqual("image/png", content_type)
+        image = Image.open(io.BytesIO(data))
+        self.assertAlmostEqual(pn.SLIDE_WIDTH_PX + 2, image.width, delta=1)
+        self.assertEqual((208, 208, 208), image.getpixel((0, 0))[:3])
+        with self.assertRaises(pn.NotionError):
+            pn.render_slide(pdf, 2)
 
 
 class TokenTests(unittest.TestCase):

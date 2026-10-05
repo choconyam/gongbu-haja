@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""학습노트 Markdown을 노션 과목 페이지의 "차시별 노트" 표에 한 줄(노트 페이지)로 올린다.
+"""학습노트를 노션 과목 페이지 아래의 차시 페이지로 올린다(공부하자 › 과목 › 차시).
 
     python scripts/push_notion.py login                        # 사용자가 자기 터미널에서 직접 실행
     python scripts/push_notion.py logout
@@ -19,12 +19,14 @@ import argparse
 import datetime as dt
 import getpass
 import hashlib
+import io
 import json
 import re
 import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,8 +34,10 @@ from typing import Any, Callable
 
 try:
     from .build_study_note_pdf import HandoffMemoError, public_text
+    from .tex_to_notion import convert_tex
 except ImportError:  # `python scripts/push_notion.py`로 직접 실행할 때
     from build_study_note_pdf import HandoffMemoError, public_text
+    from tex_to_notion import convert_tex
 
 API_URL = "https://api.notion.com/v1"
 NOTION_VERSION = "2025-09-03"
@@ -41,8 +45,7 @@ KEYRING_SERVICE = "gongbu-haja"
 KEYRING_ACCOUNT = "notion"
 STATE_DIR = ".gongbu"
 STATE_NAME = "notion.json"
-TABLE_TITLE = "차시별 노트"
-COLUMN_TITLE, COLUMN_SUMMARY, COLUMN_MODE, COLUMN_HANDOUT, COLUMN_DATE = "차시", "내용", "모드", "교안", "올린 날"
+STATE_VERSION = 2  # 1은 과목 페이지 안의 "차시별 노트" 표에 줄로 올리던 방식
 MODES = {"faithful": ("자료 충실형", "📗", "green"), "deep": ("심화 이해형", "📘", "blue")}
 CALLOUTS = {"NOTE": ("💡", "blue_background"), "IMPORTANT": ("💡", "blue_background"),
             "TIP": ("📌", "green_background"), "WARNING": ("⚠️", "orange_background"),
@@ -469,7 +472,7 @@ def convert(markdown: str, course: str = "") -> Note:
 
 
 def note_title(heading: str, course: str) -> str:
-    """`과목 1주차 — 주제`를 표의 한 줄 제목 `1주차 · 주제`로 줄인다."""
+    """`과목 1주차 — 주제`를 차시 페이지 제목 `1주차 · 주제`로 줄인다."""
     title = heading.strip()
     if course and title.startswith(course):
         title = title[len(course):].strip()
@@ -512,15 +515,24 @@ class NotionClient:
     def __repr__(self) -> str:
         return "NotionClient(token=***)"
 
-    def request(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
-        data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
+    def send_file(self, upload_id: str, filename: str, data: bytes, content_type: str) -> dict[str, Any]:
+        """만들어 둔 파일 업로드 자리에 파일 내용을 multipart로 보낸다."""
+        boundary = f"gongbu-{uuid.uuid4().hex}"
+        head = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+                f"Content-Type: {content_type}\r\n\r\n").encode("utf-8")
+        return self.request("POST", f"/file_uploads/{upload_id}/send", raw=head + data + f"\r\n--{boundary}--\r\n".encode(),
+                            content_type=f"multipart/form-data; boundary={boundary}")
+
+    def request(self, method: str, path: str, body: dict[str, Any] | None = None, *, raw: bytes | None = None,
+                content_type: str = "application/json") -> dict[str, Any]:
+        data = raw if raw is not None else None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
         for attempt in range(6):
             wait = self._min_interval - (time.monotonic() - self._last)
             if wait > 0:  # 무료 요금제 한도(초당 평균 3회)
                 self._sleep(wait)
             request = urllib.request.Request(API_URL + path, data=data, method=method, headers={
                 "Authorization": f"Bearer {self._token}", "Notion-Version": NOTION_VERSION,
-                "Content-Type": "application/json"})
+                "Content-Type": content_type})
             self._last = time.monotonic()
             try:
                 with self._opener(request, timeout=60) as response:
@@ -544,6 +556,102 @@ class NotionClient:
                     continue
                 raise NotionError(f"노션에 연결하지 못했습니다: {exc.reason}") from None
         raise NotionError("노션 요청을 여러 번 다시 보냈지만 실패했습니다.")
+
+
+# ------------------------------------------------------------------ 교안 슬라이드 그림
+
+SLIDE_PREFIX = "slide:"
+
+
+def slide_numbers(items: list[dict[str, Any]]) -> list[int]:
+    found: list[int] = []
+    for block in items:
+        body = block[block["type"]]
+        if block["type"] == "image" and str(body.get("file_upload", {}).get("id", "")).startswith(SLIDE_PREFIX):
+            found.append(int(body["file_upload"]["id"][len(SLIDE_PREFIX):]))
+        found.extend(slide_numbers(body.get("children", [])))
+    return found
+
+
+def without_slides(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """슬라이드 업로드를 끈 과목은 그림 자리에 캡션 글자(원본 PDF p.N)만 남긴다."""
+    out = []
+    for block in items:
+        body = block[block["type"]]
+        if block["type"] == "image" and str(body.get("file_upload", {}).get("id", "")).startswith(SLIDE_PREFIX):
+            caption = "".join(item["text"]["content"] for item in body.get("caption", []))
+            out.append({"type": "paragraph", "paragraph": {"rich_text": [text_item(caption, italic=True, color="gray")]}})
+            continue
+        if body.get("children"):
+            block = {**block, block["type"]: {**body, "children": without_slides(body["children"])}}
+        out.append(block)
+    return out
+
+
+def with_uploads(items: list[dict[str, Any]], uploads: dict[int, str]) -> list[dict[str, Any]]:
+    out = []
+    for block in items:
+        body = block[block["type"]]
+        if block["type"] == "image" and str(body.get("file_upload", {}).get("id", "")).startswith(SLIDE_PREFIX):
+            number = int(body["file_upload"]["id"][len(SLIDE_PREFIX):])
+            block = {**block, "image": {**body, "file_upload": {"id": uploads[number]}}}
+        elif body.get("children"):
+            block = {**block, block["type"]: {**body, "children": with_uploads(body["children"], uploads)}}
+        out.append(block)
+    return out
+
+
+SLIDE_WIDTH_PX = 1600  # 고해상도 화면에서도 노션 본문 폭에 글자가 또렷한 가로 픽셀 수
+
+
+def render_slide(pdf: Path, number: int) -> tuple[bytes, str]:
+    """교안 PDF 한 쪽을 판형과 상관없이 가로 1600px로 그리고 1px 회색 테두리를 두른다.
+
+    작은 Beamer 판형(453.5pt)도 같은 폭이 되게 배율에 상한을 두지 않는다. 무료 요금제 한도(파일당 5MiB) 안으로 줄인다.
+    """
+    try:
+        import pypdfium2 as pdfium
+        from PIL import ImageOps
+    except ImportError as exc:
+        raise NotionError("교안 슬라이드 그림을 올리려면 pypdfium2와 Pillow가 필요합니다. "
+                          "`python -m pip install pypdfium2 Pillow` 후 다시 실행하십시오.") from exc
+    document = pdfium.PdfDocument(str(pdf))
+    try:
+        if not 1 <= number <= len(document):
+            raise NotionError(f"교안 PDF에 {number}쪽이 없습니다: {pdf}")
+        page = document[number - 1]
+        image = page.render(scale=SLIDE_WIDTH_PX / page.get_width()).to_pil().convert("RGB")
+        page.close()
+    finally:
+        document.close()
+    image = ImageOps.expand(image, border=1, fill=(208, 208, 208))
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG", optimize=True)
+    if buffer.tell() <= 4_500_000:
+        return buffer.getvalue(), "image/png"
+    buffer = io.BytesIO()
+    image.save(buffer, "JPEG", quality=85)
+    return buffer.getvalue(), "image/jpeg"
+
+
+def upload_slides(client: Any, pdf: Path, numbers: list[int]) -> dict[int, str]:
+    """쪽마다 그림을 만들어 노션 파일 업로드에 올리고 {쪽: 업로드 ID}를 돌려준다."""
+    uploads: dict[int, str] = {}
+    for number in dict.fromkeys(numbers):
+        data, content_type = render_slide(pdf, number)
+        filename = f"slide-p{number:03d}.{'png' if content_type == 'image/png' else 'jpg'}"
+        created = client.request("POST", "/file_uploads", {"filename": filename, "content_type": content_type})
+        client.send_file(created["id"], filename, data, content_type)
+        uploads[number] = created["id"]
+    return uploads
+
+
+def file_sha256(path: Path) -> str:
+    digest_ = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest_.update(chunk)
+    return digest_.hexdigest()
 
 
 def keyring_module() -> Any:
@@ -595,19 +703,12 @@ def save_state(course_dir: Path, state: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
-def schema() -> dict[str, Any]:
-    return {
-        COLUMN_TITLE: {"type": "title", "title": {}},
-        COLUMN_SUMMARY: {"type": "rich_text", "rich_text": {}},
-        COLUMN_MODE: {"type": "select", "select": {"options": [{"name": label, "color": color}
-                                                               for label, _, color in MODES.values()]}},
-        COLUMN_HANDOUT: {"type": "rich_text", "rich_text": {}},
-        COLUMN_DATE: {"type": "date", "date": {}},
-    }
+def setup(client: Any, course_dir: Path, parent_reference: str, course: str, slides: bool | None = None) -> dict[str, Any]:
+    """상위 페이지 아래에 과목 페이지를 만든다. 이미 있으면 그대로 쓴다. 차시 노트는 이 과목 페이지의 하위 페이지가 된다.
 
-
-def setup(client: Any, course_dir: Path, parent_reference: str, course: str) -> dict[str, Any]:
-    """상위 페이지 아래에 과목 페이지와 "차시별 노트" 표를 만든다. 이미 있으면 그대로 쓴다."""
+    slides는 교안 슬라이드 그림을 노션에 올릴지에 대한 사용자의 답이다(None이면 기존 답을 유지한다).
+    예전 방식(과목 페이지 안의 "차시별 노트" 표)으로 연결한 과목은 과목 페이지를 그대로 쓰고 표 안 줄의 기록만 내려놓는다.
+    """
     parent_id = page_id(parent_reference)
     parent = client.request("GET", f"/pages/{parent_id}")
     if parent.get("public_url"):
@@ -615,23 +716,29 @@ def setup(client: Any, course_dir: Path, parent_reference: str, course: str) -> 
     if parent.get("in_trash"):
         raise NotionError("상위 페이지가 휴지통에 있습니다.")
     state = load_state(course_dir, required=False)
-    if state.get("parent_page_id") == parent_id and state.get("data_source_id"):
+    if state.get("parent_page_id") == parent_id and state.get("course_page_id"):
         try:
-            existing = client.request("GET", f"/pages/{state['course_page_id']}")
-            if not existing.get("in_trash"):
-                return state
+            alive = not client.request("GET", f"/pages/{state['course_page_id']}").get("in_trash")
         except NotionError as exc:
             if exc.status not in (400, 404):
                 raise
+            alive = False
+        if alive:
+            changed = "data_source_id" in state
+            if changed:  # 표의 줄은 하위 페이지가 아니므로 기록을 비우고, 다시 올리면 하위 페이지로 들어간다
+                state = {key: value for key, value in state.items() if key not in ("database_id", "data_source_id")}
+                state.update(version=STATE_VERSION, notes={})
+            if slides is not None and state.get("slides") != slides:
+                state["slides"] = slides
+                changed = True
+            if changed:
+                save_state(course_dir, state)
+            return state
     course_page = client.request("POST", "/pages", {
         "parent": {"type": "page_id", "page_id": parent_id}, "icon": {"type": "emoji", "emoji": "📚"},
         "properties": {"title": {"title": [text_item(course)]}}})
-    database = client.request("POST", "/databases", {
-        "parent": {"type": "page_id", "page_id": course_page["id"]}, "title": [text_item(TABLE_TITLE)],
-        "is_inline": True, "initial_data_source": {"properties": schema()}})
-    state = {"version": 1, "course": course, "parent_page_id": parent_id, "course_page_id": course_page["id"],
-             "course_page_url": course_page.get("url", ""), "database_id": database["id"],
-             "data_source_id": database["data_sources"][0]["id"], "slides": False, "notes": state.get("notes", {})}
+    state = {"version": STATE_VERSION, "course": course, "parent_page_id": parent_id, "course_page_id": course_page["id"],
+             "course_page_url": course_page.get("url", ""), "slides": bool(slides), "notes": {}}
     save_state(course_dir, state)
     return state
 
@@ -647,14 +754,10 @@ def digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def properties(title: str, summary: str, mode: str, handout: str, today: str) -> dict[str, Any]:
-    return {
-        COLUMN_TITLE: {"title": [text_item(title)]},
-        COLUMN_SUMMARY: {"rich_text": [text_item(summary)] if summary else []},
-        COLUMN_MODE: {"select": {"name": MODES[mode][0]}},
-        COLUMN_HANDOUT: {"rich_text": [text_item(handout)] if handout else []},
-        COLUMN_DATE: {"date": {"start": today}},
-    }
+def header_block(mode: str, handout: str, summary: str) -> dict[str, Any]:
+    """페이지 맨 위의 회색 한 줄(모드 · 교안 범위 · 내용)."""
+    text = " · ".join(part for part in (MODES[mode][0], handout, summary) if part)
+    return {"type": "paragraph", "paragraph": {"rich_text": [text_item(text)], "color": "gray"}}
 
 
 @dataclass
@@ -669,17 +772,41 @@ class Plan:
     properties_hash: str
     action: str = "create"
     previous: dict[str, Any] | None = None
+    slide_pdf: Path | None = None
+    slides: list[int] = field(default_factory=list)
+
+
+def read_note(note_path: Path, course: str, slides_on: bool) -> tuple[Note, str, Path | None, list[int]]:
+    """원고를 노션 블록으로 옮긴다. `.tex`는 심화 이해형 원고, 그 밖은 자료 충실형 Markdown으로 본다."""
+    if note_path.suffix.lower() != ".tex":
+        return convert(note_path.read_text(encoding="utf-8"), course), "faithful", None, []
+    tex = convert_tex(note_path)
+    note = Note(tex.title or note_path.stem, tex.summary, tex.blocks, list(tex.problems))
+    numbers = sorted(set(tex.slides))
+    if not slides_on:
+        note.blocks = without_slides(note.blocks)
+    elif numbers and (tex.slide_pdf is None or not tex.slide_pdf.is_file()):
+        note.problems.append(f"오류: 슬라이드 그림을 만들 교안 PDF를 찾지 못했습니다: {tex.slide_pdf}")
+    return note, "deep", tex.slide_pdf, numbers
 
 
 def plan_push(client: Any, course_dir: Path, note_path: Path, state: dict[str, Any], *, title: str | None = None,
-              summary: str | None = None, mode: str = "faithful", handout: str = "") -> Plan:
-    note = convert(note_path.read_text(encoding="utf-8"), state.get("course", ""))
+              summary: str | None = None, mode: str | None = None, handout: str = "") -> Plan:
+    if "data_source_id" in state:  # 표의 줄을 차시 페이지로 착각해 고치지 않게 한다
+        raise NotionError("예전 방식(과목 페이지 안의 표)으로 연결된 과목입니다. 과목 폴더에서 `gongbu notion setup <상위 페이지 링크>`를 "
+                          "한 번 다시 실행하면 차시 페이지 방식으로 바뀝니다.")
+    slides_on = bool(state.get("slides"))
+    note, default_mode, slide_pdf, numbers = read_note(note_path, state.get("course", ""), slides_on)
     if note.errors:
         raise NotionError("노션 변환 검사에서 오류가 나 올리지 않았습니다:\n" + "\n".join(note.errors))
     final_title = title or note.title or note_path.stem
     final_summary = note.summary if summary is None else summary
-    plan = Plan(note_key(course_dir, note_path), note, final_title, final_summary, mode, handout,
-                digest(note.blocks), digest([final_title, final_summary, mode, handout]))
+    final_mode = mode or default_mode
+    final_handout = handout or (f"교안 p.{numbers[0]}–{numbers[-1]}" if numbers else "")
+    pdf_hash = file_sha256(slide_pdf) if slides_on and numbers and slide_pdf else None
+    plan = Plan(note_key(course_dir, note_path), note, final_title, final_summary, final_mode, final_handout,
+                digest([note.blocks, pdf_hash]), digest([final_title, final_summary, final_mode, final_handout]),
+                slide_pdf=slide_pdf if slides_on else None, slides=numbers if slides_on else [])
     record = state.get("notes", {}).get(plan.key)
     if record is None:
         return plan
@@ -701,17 +828,45 @@ def plan_push(client: Any, course_dir: Path, note_path: Path, state: dict[str, A
     return plan
 
 
-def create_row(client: Any, state: dict[str, Any], plan: Plan, title: str, today: str) -> dict[str, Any]:
-    """표에 "업로드 중" 줄을 만들고 블록을 나눠 붙인 뒤 제목을 확정한다. 실패하면 만들던 줄을 휴지통으로 보낸다."""
-    icon = MODES[plan.mode][1]
+def children(client: Any, block_id: str) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    cursor = ""
+    while True:
+        page = client.request("GET", f"/blocks/{block_id}/children?page_size=100" + (f"&start_cursor={cursor}" if cursor else ""))
+        found.extend(page.get("results", []))
+        if not page.get("has_more"):
+            return found
+        cursor = page["next_cursor"]
+
+
+def page_blocks(client: Any, plan: Plan) -> list[dict[str, Any]]:
+    """머리 줄과 본문. 슬라이드 그림을 먼저 올려 두어 중간에 실패해도 반쯤 바뀐 페이지가 덜 남게 한다."""
+    body = plan.note.blocks
+    if plan.slides and plan.slide_pdf:
+        body = with_uploads(body, upload_slides(client, plan.slide_pdf, plan.slides))
+    return [header_block(plan.mode, plan.handout, plan.summary)] + body
+
+
+def append_blocks(client: Any, target: str, items: list[dict[str, Any]]) -> None:
+    for chunk in request_chunks(items):
+        client.request("PATCH", f"/blocks/{target}/children", {"children": chunk})
+
+
+def finish_page(client: Any, target: str, plan: Plan, title: str) -> dict[str, Any]:
+    return client.request("PATCH", f"/pages/{target}", {"icon": {"type": "emoji", "emoji": MODES[plan.mode][1]},
+                                                         "properties": {"title": {"title": [text_item(title)]}}})
+
+
+def create_page(client: Any, state: dict[str, Any], plan: Plan, title: str) -> dict[str, Any]:
+    """과목 페이지 맨 아래에 "업로드 중" 하위 페이지를 만들고 블록을 붙인 뒤 제목을 확정한다. 실패하면 그 페이지를 휴지통으로 보낸다."""
+    items = page_blocks(client, plan)
     page = client.request("POST", "/pages", {
-        "parent": {"type": "data_source_id", "data_source_id": state["data_source_id"]},
-        "icon": {"type": "emoji", "emoji": icon},
-        "properties": properties(f"업로드 중 · {title}", plan.summary, plan.mode, plan.handout, today)})
+        "parent": {"type": "page_id", "page_id": state["course_page_id"]},
+        "icon": {"type": "emoji", "emoji": MODES[plan.mode][1]},
+        "properties": {"title": {"title": [text_item(f"업로드 중 · {title}")]}}})
     try:
-        for chunk in request_chunks(plan.note.blocks):
-            client.request("PATCH", f"/blocks/{page['id']}/children", {"children": chunk})
-        return client.request("PATCH", f"/pages/{page['id']}", {"properties": {COLUMN_TITLE: {"title": [text_item(title)]}}})
+        append_blocks(client, page["id"], items)
+        return finish_page(client, page["id"], plan, title)
     except Exception:
         try:
             client.request("PATCH", f"/pages/{page['id']}", {"in_trash": True})
@@ -720,24 +875,48 @@ def create_row(client: Any, state: dict[str, Any], plan: Plan, title: str, today
         raise
 
 
+def replace_page(client: Any, plan: Plan, target: str, title: str) -> dict[str, Any]:
+    """같은 페이지의 내용만 바꾼다. 과목 페이지 안의 자리와 링크가 그대로다. 새 블록을 다 붙인 뒤 예전 블록을 지운다."""
+    items = page_blocks(client, plan)
+    old = [block["id"] for block in children(client, target)]
+    client.request("PATCH", f"/pages/{target}", {"properties": {"title": {"title": [text_item(f"업로드 중 · {title}")]}}})
+    append_blocks(client, target, items)
+    for block_id in old:
+        client.request("DELETE", f"/blocks/{block_id}")
+    return finish_page(client, target, plan, title)
+
+
 def push(client: Any, course_dir: Path, plan: Plan, state: dict[str, Any], today: str) -> dict[str, Any]:
     """계획대로 올리고 기록을 남긴다. 돌려주는 값은 기록된 노트 항목이다."""
     previous = plan.previous or {}
     if plan.action == "skip":
         return previous
+    revision = 1 if plan.action == "create" else previous.get("revision", 1) + (plan.action == "revision")
+    title = f"{plan.title} (수정본 {revision})" if revision > 1 else plan.title
     if plan.action == "properties":
-        page = client.request("PATCH", f"/pages/{previous['page_id']}", {
-            "properties": properties(previous.get("title", plan.title), plan.summary, plan.mode, plan.handout, today)})
-        record = {**previous, "properties_sha256": plan.properties_hash, "last_edited_time": page.get("last_edited_time")}
-    else:
-        revision = previous.get("revision", 1) + 1 if plan.action == "revision" else 1
-        title = f"{plan.title} (수정본 {revision})" if plan.action == "revision" else plan.title
-        page = create_row(client, state, plan, title, today)
-        if plan.action == "replace":  # 노션에서 손대지 않은 이전 줄만 휴지통으로 보낸다(되살릴 수 있다)
-            client.request("PATCH", f"/pages/{previous['page_id']}", {"in_trash": True})
-        record = {"page_id": page["id"], "url": page.get("url", ""), "title": title, "revision": revision,
-                  "content_sha256": plan.content_hash, "properties_sha256": plan.properties_hash,
-                  "last_edited_time": page.get("last_edited_time"), "uploaded_at": today}
+        first = client.request("GET", f"/blocks/{previous['page_id']}/children?page_size=1").get("results", [])
+        if first and first[0]["type"] == "paragraph":
+            client.request("PATCH", f"/blocks/{first[0]['id']}",
+                           {"paragraph": header_block(plan.mode, plan.handout, plan.summary)["paragraph"]})
+        page = finish_page(client, previous["page_id"], plan, title)
+    elif plan.action == "replace":
+        try:
+            page = replace_page(client, plan, previous["page_id"], title)
+        except Exception:
+            # 이번에 바뀐 수정 시각을 다음번에 사용자의 수정으로 보지 않게 맞추고, 내용은 다음에 다시 올리게 한다
+            try:
+                current = client.request("GET", f"/pages/{previous['page_id']}")
+                state["notes"][plan.key] = {**previous, "content_sha256": None,
+                                            "last_edited_time": current.get("last_edited_time")}
+                save_state(course_dir, state)
+            except NotionError:
+                pass
+            raise
+    else:  # create, revision: 과목 페이지 맨 아래에 새 하위 페이지
+        page = create_page(client, state, plan, title)
+    record = {"page_id": page["id"], "url": page.get("url", ""), "title": title, "revision": revision,
+              "content_sha256": plan.content_hash, "properties_sha256": plan.properties_hash,
+              "last_edited_time": page.get("last_edited_time"), "uploaded_at": today}
     state.setdefault("notes", {})[plan.key] = record
     save_state(course_dir, state)
     return record
@@ -745,17 +924,19 @@ def push(client: Any, course_dir: Path, plan: Plan, state: dict[str, Any], today
 
 # ------------------------------------------------------------------ 명령
 
-ACTION_TEXT = {"create": "새 줄로 올림", "replace": "새 줄로 올리고 이전 줄은 휴지통으로", "revision":
-               "노션에서 고친 흔적이 있어 덮어쓰지 않고 (수정본)으로 새 줄", "properties": "표의 속성만 고침", "skip": "바뀐 것 없음"}
+ACTION_TEXT = {"create": "과목 페이지 맨 아래에 새 페이지로 올림", "replace": "같은 페이지의 내용을 새로 바꿈(자리·링크 그대로)",
+               "revision": "노션에서 고친 흔적이 있어 덮어쓰지 않고 (수정본)으로 새 페이지", "properties": "제목과 머리 줄만 고침",
+               "skip": "바뀐 것 없음"}
 
 
 def describe(note: Note, title: str, summary: str) -> str:
     tables = sum(block["type"] == "table" for block in note.blocks)
     equations = sum(block["type"] == "equation" for block in note.blocks)
-    requests = len(request_chunks(note.blocks)) + 2
+    images = len(slide_numbers(note.blocks))
+    requests = len(request_chunks(note.blocks)) + 2 + 2 * images
     lines = [f"제목: {title}", f"내용: {summary or '(없음)'}",
-             f"블록: {len(note.blocks)}개(표 {tables}개, 독립 수식 {equations}개, 전체 요소 {count_elements(note.blocks)}개)",
-             f"예상 요청: 약 {requests}회"]
+             f"블록: {len(note.blocks)}개(표 {tables}개, 독립 수식 {equations}개, 슬라이드 그림 {images}장, "
+             f"전체 요소 {count_elements(note.blocks)}개)", f"예상 요청: 약 {requests}회"]
     lines += [f"- {problem}" for problem in dict.fromkeys(note.problems)] or ["문제: 없음"]
     return "\n".join(lines)
 
@@ -808,20 +989,22 @@ def command_logout() -> int:
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="학습노트 Markdown을 노션 과목 표에 올립니다.")
+    parser = argparse.ArgumentParser(description="학습노트를 노션 과목 페이지 아래의 차시 페이지로 올립니다.")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("login", help="노션 API 토큰을 OS 비밀번호 보관소에 저장(자기 터미널에서 직접)")
     commands.add_parser("logout", help="저장된 토큰 삭제")
-    setup_parser = commands.add_parser("setup", help="과목 페이지와 차시별 노트 표 만들기")
+    setup_parser = commands.add_parser("setup", help="과목 페이지 만들기(차시 노트는 그 아래 페이지로 올라간다)")
     setup_parser.add_argument("parent", help="노트를 모을 상위 노션 페이지 링크(연결을 추가해 둔 페이지)")
     setup_parser.add_argument("--course", default=None, help="과목 페이지 이름(기본: 과목 폴더 이름)")
+    setup_parser.add_argument("--slides", choices=("yes", "no"), default=None,
+                              help="교안 슬라이드 그림을 노션에 올릴지(사용자가 정한다. 생략하면 기존 답 유지, 처음엔 no)")
     for name in ("check", "push"):
-        sub = commands.add_parser(name, help="네트워크 없이 변환·검사" if name == "check" else "표에 노트 한 줄 올리기")
-        sub.add_argument("note", type=Path, help="학습노트 Markdown")
-        sub.add_argument("--title", default=None, help="표의 줄 제목(기본: 원고의 # 제목에서 과목명을 뺀 것)")
-        sub.add_argument("--summary", default=None, help="내용 한 줄(기본: 원고의 차시 제목을 이은 것)")
-        sub.add_argument("--handout", default="", help="교안 범위(예: 교안 01·02)")
-        sub.add_argument("--mode", choices=tuple(MODES), default="faithful")
+        sub = commands.add_parser(name, help="네트워크 없이 변환·검사" if name == "check" else "과목 페이지 아래에 노트 한 페이지 올리기")
+        sub.add_argument("note", type=Path, help="학습노트 원고(자료 충실형 Markdown 또는 심화 이해형 TeX)")
+        sub.add_argument("--title", default=None, help="페이지 제목(기본: 원고의 # 제목에서 과목명을 뺀 것, TeX는 표지의 차시)")
+        sub.add_argument("--summary", default=None, help="머리 줄의 내용(기본: 원고의 차시 제목을 이은 것, TeX는 표지의 요약)")
+        sub.add_argument("--handout", default="", help="교안 범위(예: 교안 01·02, TeX는 기본으로 슬라이드 쪽 범위)")
+        sub.add_argument("--mode", choices=tuple(MODES), default=None, help="기본: .tex는 deep, 그 밖은 faithful")
         if name == "push":
             sub.add_argument("--dry-run", action="store_true", help="올리지 않고 할 일만 보여 준다")
     for sub in commands.choices.values():
@@ -841,18 +1024,25 @@ def main(argv: list[str] | None = None) -> int:
             return command_logout()
         course_dir = args.course_dir.expanduser().resolve()
         if args.command == "check":
-            note = convert(args.note.read_text(encoding="utf-8"), load_state(course_dir, required=False).get("course", ""))
+            known = load_state(course_dir, required=False)
+            note, _, _, _ = read_note(args.note, known.get("course", ""), bool(known.get("slides")))
             print(describe(note, args.title or note.title or args.note.stem, note.summary if args.summary is None else args.summary))
             return 1 if note.errors else 0
         client = NotionClient(load_token())
         if args.command == "setup":
-            state = setup(client, course_dir, args.parent, args.course or course_dir.name)
-            print(f"과목 페이지: {state['course_page_url']}\n표: {TABLE_TITLE}\n기록: {state_path(course_dir)}")
+            slides = None if args.slides is None else args.slides == "yes"
+            before = load_state(course_dir, required=False)
+            state = setup(client, course_dir, args.parent, args.course or course_dir.name, slides)
+            print(f"과목 페이지: {state['course_page_url']}\n차시 노트: 이 과목 페이지 아래 페이지로 올라갑니다\n"
+                  f"교안 슬라이드 그림: {'올림' if state.get('slides') else '올리지 않음(캡션 글자만)'}\n기록: {state_path(course_dir)}")
+            if "data_source_id" in before and before.get("course_page_id") == state["course_page_id"]:
+                print("예전 방식의 '차시별 노트' 표가 과목 페이지에 남아 있습니다. 노트를 다시 올리면 과목 페이지 아래 차시 페이지로 "
+                      "들어가니, 다 올린 뒤 노션에서 그 표를 지우십시오.")
             return 0
         state = load_state(course_dir)
         plan = plan_push(client, course_dir, args.note, state, title=args.title, summary=args.summary,
                          mode=args.mode, handout=args.handout)
-        print(f"위치: {state['course']} › {TABLE_TITLE}\n할 일: {ACTION_TEXT[plan.action]}\n"
+        print(f"위치: {state['course']} 과목 페이지 아래\n할 일: {ACTION_TEXT[plan.action]}\n"
               + describe(plan.note, plan.title, plan.summary))
         if args.dry_run or plan.action == "skip":
             return 0
