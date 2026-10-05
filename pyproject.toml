@@ -37,7 +37,10 @@ transcription = [
   "nvidia-cuda-nvrtc-cu12>=12.4; platform_system != 'Darwin'",
 ]
 pdf = ["reportlab>=4.0", "pypdf>=5.0"]
+# 노션 토큰을 OS 비밀번호 보관소(Windows 자격 증명 관리자, macOS 키체인)에 두는 데만 쓴다.
+notion = ["keyring>=24"]
 all = [
+  "keyring>=24",
   "PyAudioWPatch>=0.2.12.7,<0.3",
   "faster-whisper==1.2.1",
   "pypdf>=5.0",

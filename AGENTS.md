@@ -13,6 +13,7 @@
 | 기존 노트 검수만 | `note_final_rules.md`, `rules/review-checklists.md`의 해당 검수 항목 | 지적 근거가 있는 원자료 구간; 제작 파이프라인을 새로 시작하지 않음 |
 | 디자인·여백·글꼴·출력 형식만 수정 | `agent_prompts/layout_builder.md`, 선택 형식의 출력 계약 | 기존 상태를 갱신할 때만 `rules/orchestration.md`의 입력 변경·실패 반환 절 |
 | 녹음·전사만 | `rules/transcription-workflow.md`의 해당 단계, 실제 담당 역할 프롬프트 | 노트 집필은 별도 요청이 있을 때만 |
+| 노트를 노션으로 올리기 | `rules/notion-output-contract.md` | 노트 제작이 함께 필요하면 위 제작 경로 |
 | 엔진 코드·규칙·스킬 유지보수 | `rules/repository-maintenance.md` | 변경 파일과 직접 연결된 계약·테스트 |
 | 사용법·상태·단순 질문 | 답에 필요한 명령 도움말·상태·해당 지침 절 | 위 제작·검수 경로는 실행하지 않음 |
 

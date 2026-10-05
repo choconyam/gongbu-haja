@@ -122,6 +122,26 @@ gongbu transcribe 2026-03-10_1주차\2026-03-10_1주차_20260310_090000.wav   # 
 
 CLI 설치본은 Git 작업 폴더와 별개다. CLI 설치를 갱신할 때는 `pipx upgrade gongbu-haja`를 사용하고, 사용자 범위 에이전트 선언이 바뀌었다면 `gongbu setup-agents`로 동기화한다. 저장소의 `git pull`만으로 설치본까지 바뀌지는 않는다.
 
+### 노션으로 받기 (선택)
+
+학습노트를 노션 과목 페이지의 "차시별 노트" 표에 한 줄씩 올릴 수 있다. 지금은 자료 충실형 Markdown 노트를 올린다. 처음 한 번은 사용자가 직접 한다.
+
+1. 노션 개발자 도구의 [연결](https://www.notion.so/profile/integrations) 화면에서 **+ 신규 연결**을 누르고, 인증 방법은 **API 토큰**으로 만든다(OAuth는 배포용 앱용이다). 노트를 둘 워크스페이스를 고르고, 기능은 콘텐츠 읽기·업데이트·입력만 켜고 댓글·사용자 정보는 끈다. 화면의 API 토큰은 복사 버튼으로만 복사해 다음 3단계에서 쓰고, 어디에도 붙여 넣거나 캡처하지 않는다. 옆의 새로 고침 버튼은 토큰을 재발급하므로 누르지 않는다.
+2. 토큰 보관용 keyring을 설치한다. 전역 CLI는 `pipx inject gongbu-haja keyring`, 저장소에서 바로 쓰면 `python -m pip install keyring`.
+3. PowerShell, 명령 프롬프트, VS Code 터미널 중 하나에서 `gongbu notion login`을 실행하고 토큰을 한 번 붙여 넣은 뒤 Enter를 누른다. 입력은 화면에 보이지 않는 것이 정상이며, 토큰은 Windows 자격 증명 관리자(macOS는 키체인)에만 저장된다. AI 채팅창에는 붙여 넣지 않는다. Git Bash처럼 입력을 숨길 수 없는 터미널에서는 받지 않는다.
+4. 노션에서 노트를 모을 상위 페이지(예: "공부하자")를 만들고 오른쪽 위 `⋯` → 연결에서 방금 만든 연결을 추가한다(연결 설정의 '콘텐츠 사용 권한' 탭에서 추가해도 된다). 연결은 이 페이지 아래에만 쓸 수 있으므로, 첫 상위 페이지는 사용자가 직접 만들어 연결해야 한다.
+
+그다음은 과목 폴더에서 한다. 저장소에서 바로 쓴다면 `gongbu notion` 대신 `python <저장소>/scripts/push_notion.py`에 `--course-dir <과목 폴더>`를 붙인다.
+
+```bash
+gongbu notion setup <상위 페이지 링크> --course "과목명"   # 과목 페이지와 "차시별 노트" 표 만들기
+gongbu notion check 1주차/노트.md                          # 네트워크 없이 변환·검사
+gongbu notion push 1주차/노트.md --dry-run                 # 올릴 위치와 내용 확인
+gongbu notion push 1주차/노트.md --handout "교안 01·02"
+```
+
+AI에게 "1주차 노트 노션에 올려줘"라고 하면 이 순서로 진행하고, 올리기 전에 위치와 내용을 보여 주고 확인을 받는다. 다시 올리면 바뀐 노트만 새로 올리고, 노션에서 직접 고친 페이지는 덮어쓰지 않고 "(수정본 2)"로 따로 만든다. 웹에 공개된 페이지에는 올리지 않는다. 토큰이 유출됐다면 노션 연동 설정에서 재발급한 뒤 `gongbu notion login`으로 새 토큰을 넣는다(지우기: `gongbu notion logout`).
+
 | 방식 | 대상 | 설치·실행 |
 |---|---|---|
 | **프로젝트로 직접 열기 (기본)** | Codex, Claude Code, Cursor | `git clone` 후 저장소 폴더를 열고 요청. 업데이트는 `git pull --ff-only` |
