@@ -134,13 +134,13 @@ CLI 설치본은 Git 작업 폴더와 별개다. CLI 설치를 갱신할 때는 
 그다음은 과목 폴더에서 한다. 저장소에서 바로 쓴다면 `gongbu notion` 대신 `python <저장소>/scripts/push_notion.py`에 `--course-dir <과목 폴더>`를 붙인다.
 
 ```bash
-gongbu notion setup <상위 페이지 링크> --course "과목명" --slides no   # 과목 페이지 만들기
+gongbu notion setup <상위 페이지 링크> --course "과목명"   # 과목 페이지 만들기
 gongbu notion check 1주차/노트.md                          # 네트워크 없이 변환·검사
 gongbu notion push 1주차/노트.md --dry-run                 # 올릴 위치와 내용 확인
 gongbu notion push 1주차/노트.md --handout "교안 01·02"
 ```
 
-심화 이해형은 PDF를 만든 TeX 원고(`output/source/…tex`)를 그대로 `check`·`push`에 넘기면 된다. 원본 교안 슬라이드 그림까지 올리려면 setup에서 `--slides yes`를 준다. 교수 자료를 노션에 올리는 일이므로 과목마다 학교·교수자 방침을 확인하고 정한다.
+심화 이해형은 PDF를 만든 TeX 원고(`output/source/…tex`)를 그대로 `check`·`push`에 넘기면 된다. 원본 교안 슬라이드 그림도 기본으로 함께 올라간다. 웹에 공개된 상위 페이지에는 아예 올리지 않으므로 비공개 페이지에만 들어간다. 학교·교수자 방침상 빼야 하는 과목은 setup에서 `--slides no`를 준다.
 
 AI에게 "1주차 노트 노션에 올려줘"라고 하면 이 순서로 진행하고, 올리기 전에 위치와 내용을 보여 주고 확인을 받는다. 새 차시는 과목 페이지 맨 아래에 붙고, 다시 올리면 바뀐 노트의 페이지만 같은 자리·같은 링크에서 내용이 바뀐다. 노션에서 직접 고친 페이지가 있으면 올리기를 멈추고 알린다(빈 줄만 생긴 것은 괜찮다). 고친 내용을 원고에 반영한 뒤 `--overwrite`로 다시 올리면 같은 페이지가 바뀌어 수정이 두 페이지로 갈라지지 않는다. 차시 순서를 바꾸려면 노션 사이드바에서 페이지를 끌어 옮긴다. 웹에 공개된 페이지에는 올리지 않는다. 토큰이 유출됐다면 노션 연동 설정에서 재발급한 뒤 `gongbu notion login`으로 새 토큰을 넣는다(지우기: `gongbu notion logout`).
 

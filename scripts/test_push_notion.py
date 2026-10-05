@@ -246,6 +246,8 @@ class FlowTests(unittest.TestCase):
         self.assertEqual("과목A", course["properties"]["title"]["title"][0]["text"]["content"])
         self.assertEqual(pn.STATE_VERSION, state["version"])
         self.assertNotIn("data_source_id", state)
+        self.assertTrue(state["slides"])  # 새 과목은 묻지 않고 슬라이드를 올린다(비공개 페이지에만)
+        self.assertFalse(pn.setup(self.client, self.course, PARENT, "과목A", False)["slides"])  # 빼라고 할 때만 끈다
         self.assertTrue(pn.state_path(self.course).is_file())
         calls = len(self.client.calls)
         pn.setup(self.client, self.course, PARENT, "과목A")  # 다시 해도 새로 만들지 않는다

@@ -706,7 +706,8 @@ def save_state(course_dir: Path, state: dict[str, Any]) -> None:
 def setup(client: Any, course_dir: Path, parent_reference: str, course: str, slides: bool | None = None) -> dict[str, Any]:
     """상위 페이지 아래에 과목 페이지를 만든다. 이미 있으면 그대로 쓴다. 차시 노트는 이 과목 페이지의 하위 페이지가 된다.
 
-    slides는 교안 슬라이드 그림을 노션에 올릴지에 대한 사용자의 답이다(None이면 기존 답을 유지한다).
+    slides는 교안 슬라이드 그림을 노션에 올릴지다. None이면 기존 과목은 그대로 두고 새 과목은 올린다.
+    웹에 공개된 상위 페이지는 거부하므로 그림은 비공개 페이지에만 올라간다.
     예전 방식(과목 페이지 안의 "차시별 노트" 표)으로 연결한 과목은 과목 페이지를 그대로 쓰고 표 안 줄의 기록만 내려놓는다.
     """
     parent_id = page_id(parent_reference)
@@ -738,7 +739,7 @@ def setup(client: Any, course_dir: Path, parent_reference: str, course: str, sli
         "parent": {"type": "page_id", "page_id": parent_id}, "icon": {"type": "emoji", "emoji": "📚"},
         "properties": {"title": {"title": [text_item(course)]}}})
     state = {"version": STATE_VERSION, "course": course, "parent_page_id": parent_id, "course_page_id": course_page["id"],
-             "course_page_url": course_page.get("url", ""), "slides": bool(slides), "notes": {}}
+             "course_page_url": course_page.get("url", ""), "slides": True if slides is None else slides, "notes": {}}
     save_state(course_dir, state)
     return state
 
@@ -1098,7 +1099,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     setup_parser.add_argument("parent", help="노트를 모을 상위 노션 페이지 링크(연결을 추가해 둔 페이지)")
     setup_parser.add_argument("--course", default=None, help="과목 페이지 이름(기본: 과목 폴더 이름)")
     setup_parser.add_argument("--slides", choices=("yes", "no"), default=None,
-                              help="교안 슬라이드 그림을 노션에 올릴지(사용자가 정한다. 생략하면 기존 답 유지, 처음엔 no)")
+                              help="교안 슬라이드 그림을 노션에 올릴지(생략하면 기존 과목은 그대로, 새 과목은 올림)")
     for name in ("check", "push"):
         sub = commands.add_parser(name, help="네트워크 없이 변환·검사" if name == "check" else "과목 페이지 아래에 노트 한 페이지 올리기")
         sub.add_argument("note", type=Path, help="학습노트 원고(자료 충실형 Markdown 또는 심화 이해형 TeX)")
