@@ -15,6 +15,10 @@ All prompts, rules, CLI output and the detailed documentation under [`docs/`](do
 
 The mode selects how far the explanation goes, not which model is used.
 
+## Notion (optional)
+
+Notes of either mode can be pushed to Notion, one page per lecture under a course page. Deep notes keep their equation numbers and handout slides, and pushing a revised note updates the same page. The Notion token stays in the OS credential store. Setup steps are in the Korean install guide ([`docs/install.md`](docs/install.md)).
+
 ## Quick start
 
 ```bash
