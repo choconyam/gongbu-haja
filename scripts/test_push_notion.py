@@ -9,6 +9,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from scripts import push_notion as pn
@@ -104,18 +105,17 @@ class FakeClient:
         if method == "PATCH" and route.endswith("/children"):
             if self.fail_on_append:
                 raise pn.NotionError("서버 오류", 500, "internal_server_error")
-            for block in body["children"]:
-                self.created += 1
-                self.blocks.setdefault(target, []).append({**block, "id": f"block-{self.created}"})
+            self.store(target, body["children"])
             self.pages[target]["last_edited_time"] = self.stamp()
             return {"results": body["children"]}
         if method in ("PATCH", "DELETE") and route.startswith("/blocks/"):
-            page_id, block = self.owner(target)
+            parent, block = self.owner(target)
             if method == "DELETE":
-                self.blocks[page_id].remove(block)
+                self.blocks[parent].remove(block)
             else:
                 block.update(body)
-            self.pages[page_id]["last_edited_time"] = self.stamp()
+            if parent in self.pages:
+                self.pages[parent]["last_edited_time"] = self.stamp()
             return block
         if method == "PATCH" and route.startswith("/pages/"):
             page = self.pages[target]
@@ -131,6 +131,17 @@ class FakeClient:
     def send_file(self, upload_id: str, filename: str, data: bytes, content_type: str) -> dict:
         self.calls.append(("SEND", f"/file_uploads/{upload_id}/send", {"filename": filename, "bytes": len(data)}))
         return {"id": upload_id, "status": "uploaded"}
+
+    def store(self, parent: str, items: list[dict]) -> None:
+        """노션처럼 하위 블록은 따로 두고 has_children으로 알린다."""
+        for block in items:
+            self.created += 1
+            block = copy.deepcopy(block)
+            nested = block[block["type"]].pop("children", [])
+            block.update(id=f"block-{self.created}", has_children=bool(nested))
+            self.blocks.setdefault(parent, []).append(block)
+            if nested:
+                self.store(block["id"], nested)
 
     def count(self, method: str, prefix: str) -> int:
         return sum(1 for call in self.calls if call[0] == method and call[1].startswith(prefix))
@@ -222,7 +233,7 @@ class FlowTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def push(self, **options: str) -> dict:
+    def push(self, **options: Any) -> dict:
         state = pn.load_state(self.course)
         plan = pn.plan_push(self.client, self.course, self.note, state, **options)
         self.last_action = plan.action
@@ -308,16 +319,46 @@ class FlowTests(unittest.TestCase):
         self.push()
         self.assertEqual("skip", self.last_action)
 
-    def test_page_edited_in_notion_is_never_overwritten(self) -> None:
+    def test_page_edited_in_notion_stops_until_the_edit_is_in_the_note(self) -> None:
         pn.setup(self.client, self.course, PARENT, "과목A")
         first = self.push()
-        self.client.pages[first["page_id"]]["last_edited_time"] = "2026-10-06T09:00:00.000Z"  # 사용자가 노션에서 고침
-        self.note.write_text(NOTE.replace("첫째", "첫째 항목"), encoding="utf-8")
-        second = self.push()
-        self.assertEqual("revision", self.last_action)
-        self.assertFalse(self.client.pages[first["page_id"]]["in_trash"])
-        self.assertEqual(0, self.client.count("DELETE", "/blocks/"))
-        self.assertEqual("1주차 · 미디어의 이해 (수정본 2)", second["title"])
+        edited = next(block for block in self.client.blocks[first["page_id"]][1:] if block["type"] == "paragraph")
+        edited["paragraph"]["rich_text"] = [{"type": "text", "text": {"content": "노션에서 고친 문장"}}]  # 사용자가 노션에서 고침
+        self.client.pages[first["page_id"]]["last_edited_time"] = "2026-10-06T09:00:00.000Z"
+        plan = pn.plan_push(self.client, self.course, self.note, pn.load_state(self.course))
+        self.assertEqual(("edited", False), (plan.action, plan.local_changed))
+        self.note.write_text(NOTE.replace("첫째", "첫째 항목"), encoding="utf-8")  # 노션의 수정을 원고에 옮김
+        posts, calls = self.client.count("POST", "/pages"), len(self.client.calls)
+        with self.assertRaises(pn.NotionError):  # 수정이 두 페이지로 갈라지지 않게 새 페이지를 만들지 않는다
+            self.push()
+        self.assertEqual(("edited", True), (self.last_action, pn.plan_push(
+            self.client, self.course, self.note, pn.load_state(self.course)).local_changed))
+        self.assertEqual(0, sum(1 for method, *_ in self.client.calls[calls:] if method != "GET"))
+        second = self.push(overwrite=True)
+        self.assertEqual("replace", self.last_action)
+        self.assertEqual(first["page_id"], second["page_id"])
+        self.assertEqual(posts, self.client.count("POST", "/pages"))
+        self.assertEqual("1주차 · 미디어의 이해", self.client.title(first["page_id"]))
+        self.assertIn("첫째 항목", json.dumps(self.client.blocks[first["page_id"]], ensure_ascii=False))
+        self.push()
+        self.assertEqual("skip", self.last_action)
+
+    def test_empty_paragraph_or_bold_change_in_notion(self) -> None:
+        pn.setup(self.client, self.course, PARENT, "과목A")
+        first = self.push()
+        page = self.client.pages[first["page_id"]]
+        self.client.store(first["page_id"], [{"type": "paragraph", "paragraph": {"rich_text": []}}])  # 빈 곳을 누름
+        page["last_edited_time"] = "2026-10-06T09:00:00.000Z"
+        self.push()
+        self.assertEqual("skip", self.last_action)  # 빈 문단은 고친 것으로 보지 않는다
+        self.assertEqual("2026-10-06T09:00:00.000Z", pn.load_state(self.course)["notes"]["1주차/노트.md"]["last_edited_time"])
+        reads = self.client.count("GET", "/blocks/")
+        self.push()
+        self.assertEqual(("skip", reads), (self.last_action, self.client.count("GET", "/blocks/")))  # 다시 읽지 않는다
+        target = next(block for block in self.client.blocks[first["page_id"]] if block["type"] == "heading_1")
+        target["heading_1"]["rich_text"][0]["annotations"] = {"bold": True}  # 서식만 바꿔도 고친 것이다
+        page["last_edited_time"] = "2026-10-06T10:00:00.000Z"
+        self.assertEqual("edited", pn.plan_push(self.client, self.course, self.note, pn.load_state(self.course)).action)
 
     def test_deleted_page_is_recreated(self) -> None:
         pn.setup(self.client, self.course, PARENT, "과목A")

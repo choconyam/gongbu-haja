@@ -5,7 +5,7 @@
     python scripts/push_notion.py logout
     python scripts/push_notion.py setup <상위 페이지 링크> --course <과목명>
     python scripts/push_notion.py check <노트.md>             # 네트워크 없이 변환·검사
-    python scripts/push_notion.py push <노트.md> [--dry-run]
+    python scripts/push_notion.py push <노트.md> [--dry-run] [--overwrite]
 
 과목 폴더에서는 `gongbu notion ...`으로 부른다. 변환과 업로드는 Python이 하므로 AI 토큰이 들지 않고
 옮기다 내용이 빠지지 않는다. 노션 통신은 표준 라이브러리만 쓰고, 토큰은 선택 설치 keyring으로 OS
@@ -774,6 +774,93 @@ class Plan:
     previous: dict[str, Any] | None = None
     slide_pdf: Path | None = None
     slides: list[int] = field(default_factory=list)
+    local_changed: bool = False  # 노션에서 고친 흔적이 있을 때, 원고도 마지막으로 올린 뒤 바뀌었는지
+    seen_time: str | None = None  # 수정 시각은 바뀌었지만 빈 문단만 생긴 페이지의 지금 수정 시각
+
+
+# ------------------------------------------------------------------ 노션에서 고쳤는지 비교
+
+def run_text(items: list[dict[str, Any]]) -> tuple[str, str]:
+    """rich text를 (글자, 글자+서식) 두 줄로. 같은 서식의 조각은 이어 붙여 노션이 조각을 나누는 방식과 상관없게 한다."""
+    runs: list[list[str]] = []
+    for item in items:
+        if "plain_text" in item:
+            text = item["plain_text"]
+        elif item.get("type") == "equation":
+            text = item["equation"]["expression"]
+        else:
+            text = item.get("text", {}).get("content", "")
+        annotations = item.get("annotations", {})
+        flags = [name for name in ("bold", "italic", "strikethrough", "underline", "code") if annotations.get(name)]
+        if annotations.get("color", "default") != "default":
+            flags.append(annotations["color"])
+        if item.get("type") == "equation":
+            flags.append("equation")
+        link = item.get("href") or (item.get("text", {}).get("link") or {}).get("url")
+        if link:
+            flags.append(link)
+        mark = ",".join(flags)
+        if runs and runs[-1][1] == mark:
+            runs[-1][0] += text
+        else:
+            runs.append([text, mark])
+    return "".join(text for text, _ in runs), "".join(text + (f"⟦{mark}⟧" if mark else "") for text, mark in runs)
+
+
+def outline_line(kind: str, body: dict[str, Any], has_children: bool) -> str | None:
+    """블록 하나를 비교할 한 줄로. 빈 문단은 None이다(노션에서 빈 곳을 누르면 생겨 고친 것으로 보지 않는다)."""
+    if kind == "equation":
+        plain = marked = body.get("expression", "")
+    elif kind == "image":
+        plain, marked = run_text(body.get("caption", []))
+    elif kind == "table_row":
+        pairs = [run_text(cell) for cell in body.get("cells", [])]
+        plain, marked = " | ".join(p for p, _ in pairs), " | ".join(m for _, m in pairs)
+    else:
+        plain, marked = run_text(body.get("rich_text", []))
+        if kind == "to_do":
+            marked = ("[x] " if body.get("checked") else "[ ] ") + marked
+    if kind == "paragraph" and not plain.strip() and not has_children:
+        return None
+    return f"{kind}({body.get('color', 'default')}):{marked}"
+
+
+def outline(items: list[dict[str, Any]], depth: int = 0) -> list[str]:
+    """보낼 블록의 비교용 줄 목록."""
+    lines: list[str] = []
+    for block in items:
+        body = block[block["type"]]
+        line = outline_line(block["type"], body, bool(body.get("children")))
+        if line is not None:
+            lines.append(f"{depth}|{line}")
+        lines.extend(outline(body.get("children", []), depth + 1))
+    return lines
+
+
+def remote_outline(client: Any, block_id: str, depth: int = 0) -> list[str]:
+    """노션에 있는 페이지의 비교용 줄 목록. 하위 블록이 있는 블록은 한 번씩 더 읽는다."""
+    lines: list[str] = []
+    for block in children(client, block_id):
+        line = outline_line(block["type"], block.get(block["type"], {}), bool(block.get("has_children")))
+        if line is not None:
+            lines.append(f"{depth}|{line}")
+        if block.get("has_children"):
+            lines.extend(remote_outline(client, block["id"], depth + 1))
+    return lines
+
+
+def page_items(plan: Plan) -> list[dict[str, Any]]:
+    return [header_block(plan.mode, plan.handout, plan.summary)] + plan.note.blocks
+
+
+def untouched(client: Any, plan: Plan, record: dict[str, Any]) -> bool:
+    """노션 페이지의 글자·구조·서식이 마지막으로 올린 그대로인지. 빈 문단이 생긴 것은 고친 것으로 보지 않는다."""
+    expected = record.get("outline_sha256")
+    if expected is None:  # 비교 기록이 없는 예전 기록: 원고가 그대로일 때만 지금 변환 결과가 올린 내용이다
+        if (plan.content_hash, plan.properties_hash) != (record.get("content_sha256"), record.get("properties_sha256")):
+            return False
+        expected = digest(outline(page_items(plan)))
+    return digest(remote_outline(client, record["page_id"])) == expected
 
 
 def read_note(note_path: Path, course: str, slides_on: bool) -> tuple[Note, str, Path | None, list[int]]:
@@ -791,7 +878,7 @@ def read_note(note_path: Path, course: str, slides_on: bool) -> tuple[Note, str,
 
 
 def plan_push(client: Any, course_dir: Path, note_path: Path, state: dict[str, Any], *, title: str | None = None,
-              summary: str | None = None, mode: str | None = None, handout: str = "") -> Plan:
+              summary: str | None = None, mode: str | None = None, handout: str = "", overwrite: bool = False) -> Plan:
     if "data_source_id" in state:  # 표의 줄을 차시 페이지로 착각해 고치지 않게 한다
         raise NotionError("예전 방식(과목 페이지 안의 표)으로 연결된 과목입니다. 과목 폴더에서 `gongbu notion setup <상위 페이지 링크>`를 "
                           "한 번 다시 실행하면 차시 페이지 방식으로 바뀝니다.")
@@ -819,8 +906,15 @@ def plan_push(client: Any, course_dir: Path, note_path: Path, state: dict[str, A
         raise
     if page.get("in_trash") or page.get("archived"):
         return plan
-    if page.get("last_edited_time") != record.get("last_edited_time"):
-        plan.action = "revision"  # 노션에서 고친 흔적이 있으면 덮어쓰지 않는다
+    edited = page.get("last_edited_time") != record.get("last_edited_time")
+    if edited and not overwrite and untouched(client, plan, record):
+        edited = False  # 빈 문단만 생겼다(노션에서 빈 곳을 누름)
+        plan.seen_time = page.get("last_edited_time")
+    if edited:
+        # 노션에서 고쳤다: 수정이 두 페이지로 갈라지지 않게 새 페이지를 만들지 않고 멈춘다.
+        # 고친 내용을 원고에 반영한 뒤(또는 버리기로 한 뒤) overwrite로 같은 페이지를 원고 내용으로 바꾼다.
+        plan.local_changed = plan.content_hash != record.get("content_sha256")
+        plan.action = "replace" if overwrite else "edited"
     elif plan.content_hash == record.get("content_sha256"):
         plan.action = "skip" if plan.properties_hash == record.get("properties_sha256") else "properties"
     else:
@@ -890,9 +984,13 @@ def push(client: Any, course_dir: Path, plan: Plan, state: dict[str, Any], today
     """계획대로 올리고 기록을 남긴다. 돌려주는 값은 기록된 노트 항목이다."""
     previous = plan.previous or {}
     if plan.action == "skip":
+        if plan.seen_time:  # 빈 문단만 생긴 페이지: 다음에 다시 비교하지 않게 지금 수정 시각을 기록한다
+            previous = state["notes"][plan.key] = {**previous, "last_edited_time": plan.seen_time}
+            save_state(course_dir, state)
         return previous
-    revision = 1 if plan.action == "create" else previous.get("revision", 1) + (plan.action == "revision")
-    title = f"{plan.title} (수정본 {revision})" if revision > 1 else plan.title
+    if plan.action == "edited":
+        raise NotionError(EDITED_HELP)
+    title = plan.title
     if plan.action == "properties":
         first = client.request("GET", f"/blocks/{previous['page_id']}/children?page_size=1").get("results", [])
         if first and first[0]["type"] == "paragraph":
@@ -912,10 +1010,11 @@ def push(client: Any, course_dir: Path, plan: Plan, state: dict[str, Any], today
             except NotionError:
                 pass
             raise
-    else:  # create, revision: 과목 페이지 맨 아래에 새 하위 페이지
+    else:  # create: 과목 페이지 맨 아래에 새 하위 페이지
         page = create_page(client, state, plan, title)
-    record = {"page_id": page["id"], "url": page.get("url", ""), "title": title, "revision": revision,
+    record = {"page_id": page["id"], "url": page.get("url", ""), "title": title,
               "content_sha256": plan.content_hash, "properties_sha256": plan.properties_hash,
+              "outline_sha256": digest(outline(page_items(plan))),  # 노션에서 고쳤는지 볼 때 비교할 올린 내용
               "last_edited_time": page.get("last_edited_time"), "uploaded_at": today}
     state.setdefault("notes", {})[plan.key] = record
     save_state(course_dir, state)
@@ -925,8 +1024,10 @@ def push(client: Any, course_dir: Path, plan: Plan, state: dict[str, Any], today
 # ------------------------------------------------------------------ 명령
 
 ACTION_TEXT = {"create": "과목 페이지 맨 아래에 새 페이지로 올림", "replace": "같은 페이지의 내용을 새로 바꿈(자리·링크 그대로)",
-               "revision": "노션에서 고친 흔적이 있어 덮어쓰지 않고 (수정본)으로 새 페이지", "properties": "제목과 머리 줄만 고침",
-               "skip": "바뀐 것 없음"}
+               "edited": "노션에서 고친 흔적이 있어 멈춤", "properties": "제목과 머리 줄만 고침", "skip": "바뀐 것 없음"}
+EDITED_HELP = ("노션에서 이 페이지를 고친 흔적이 있습니다. 수정이 두 페이지로 갈라지지 않게 새 페이지를 만들지 않습니다. "
+               "노션에서 고친 내용을 원고에 반영한 뒤 `--overwrite`로 다시 올리면 같은 페이지가 원고 내용으로 바뀝니다. "
+               "노션의 수정을 버릴 때도 `--overwrite`를 씁니다.")
 
 
 def describe(note: Note, title: str, summary: str) -> str:
@@ -1007,6 +1108,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         sub.add_argument("--mode", choices=tuple(MODES), default=None, help="기본: .tex는 deep, 그 밖은 faithful")
         if name == "push":
             sub.add_argument("--dry-run", action="store_true", help="올리지 않고 할 일만 보여 준다")
+            sub.add_argument("--overwrite", action="store_true",
+                             help="노션에서 고친 흔적이 있어도 같은 페이지를 원고 내용으로 바꾼다(노션의 수정을 원고에 반영했거나 버릴 때만)")
     for sub in commands.choices.values():
         sub.add_argument("--course-dir", type=Path, default=Path.cwd(), help="과목 폴더(기본: 현재 폴더)")
     return parser.parse_args(argv)
@@ -1041,13 +1144,18 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         state = load_state(course_dir)
         plan = plan_push(client, course_dir, args.note, state, title=args.title, summary=args.summary,
-                         mode=args.mode, handout=args.handout)
+                         mode=args.mode, handout=args.handout, overwrite=args.overwrite)
         print(f"위치: {state['course']} 과목 페이지 아래\n할 일: {ACTION_TEXT[plan.action]}\n"
               + describe(plan.note, plan.title, plan.summary))
-        if args.dry_run or plan.action == "skip":
+        if plan.action == "edited":
+            print(("원고도 마지막으로 올린 뒤 바뀌었습니다. " if plan.local_changed
+                   else "원고는 마지막으로 올린 뒤 그대로입니다. ") + EDITED_HELP)
+            return 1
+        if args.dry_run or (plan.action == "skip" and not plan.seen_time):
             return 0
         record = push(client, course_dir, plan, state, dt.date.today().isoformat())
-        print(f"올림: {record.get('url', '')}")
+        if plan.action != "skip":
+            print(f"올림: {record.get('url', '')}")
         return 0
     except (NotionError, HandoffMemoError, OSError, ValueError, KeyError) as exc:
         print(f"[오류] {exc}", file=sys.stderr)
