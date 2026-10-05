@@ -31,7 +31,7 @@ Use these as evidence-based gates, not as a demand that every note contain every
 - In `deep`, `deep-output-contract.md` is satisfied: easy integrated explanations, retained in-scope original slides and source exercises, textbook math, the fixed design from `../scripts/deep_note_style.tex`, and no unsolicited quizzes or answer/summary/production appendices.
 - In `deep`, one canonical TeX body is authored, reviewed, patched, and compiled; no separate review-only Markdown body is required. Scope/transcript preflight and a representative 1-2-page layout check are recorded or valid prior layout evidence is reused. Every final PDF page is visually checked, including dense math and reduced slides at readable scale.
 - Layout-only changes with unchanged source content reuse semantic review; content changes follow the existing patch/repair and coverage gates. Changed source hashes are never hidden to avoid review. Compilation alone is not visual QA.
-- In a managed `deep` run, an independent `quality_xhigh` review reads the completed note once after `quality_high` authoring and checks global logic, prerequisite links, derivation continuity, assumptions, and application conditions. In direct production, one whole-note self-check covers the same points and is recorded as `review_method=self`.
+- In a managed `deep` run, an independent `quality_xhigh` review reads the completed note once after `quality_high` authoring and checks global logic, prerequisite links, derivation continuity, assumptions, and application conditions, and applies the Density Audit once to the whole note. In direct production, one whole-note self-check covers the same points and is recorded as `review_method=self`.
 - A mode change reused unchanged transcription and source mapping while rerunning writer and downstream roles only.
 
 ### Recording and transcript quality, when applicable
@@ -118,6 +118,8 @@ When a finding depends on a transcript, include its verification status. A trans
 
 ## Density Audit
 
+Judge both directions against one reader: a student meeting the course material for the first time, using only the note. "Obvious" means obvious to that reader, not to the author.
+
 Suspect an explanation is too thin when it only:
 
 - paraphrases a slide title;
@@ -127,4 +129,21 @@ Suspect an explanation is too thin when it only:
 - reduces an instructor explanation to “important” or “on the exam”;
 - adds unsupported background as a keyword list.
 
-Repair thinness by answering the missing learner question: what, why, how to read it, when it applies, how it connects, or how to recognize it on an exam. Do not repair it by repeating the same claim in more words.
+Also flag a thin spot when the note:
+
+- uses a symbol or term before its definition without saying where it is defined;
+- starts a worked problem from substituted numbers without the general equation, origin, sign convention, or initial condition;
+- skips a step a first-time learner cannot do mentally, such as a multiplier, sign, quadrant, product order, or integration limit, or changes an equality without naming the rule used;
+- leaves a slide's callouts, highlighted boxes, or multiple examples unread;
+- states a definition or rule and follows it only with what it is not, never why it is defined that way;
+- answers a question raised earlier, or reuses an earlier definition or result, without pointing back to it;
+- keeps an attribution such as “the instructor stressed X” while the instructor's actual reasoning is missing.
+
+Suspect the note is padded when it:
+
+- repeats the same warning or claim in several places;
+- re-derives a calculation already shown earlier in the same way;
+- adds surrounding theory, alternative derivations, extra examples, or anticipated questions that the next step does not need;
+- spends body text on workflow notes, such as transcript-error history, “kept as in the lecture,” or traces of earlier corrections.
+
+Repair thinness by answering the missing learner question: what, why, how to read it, when it applies, how it connects, or how to recognize it on an exam, usually in one to three sentences or one intermediate equation. Do not repair it by repeating the same claim in more words. Repair padding by merging or deleting, and use the space for the missing explanation.
