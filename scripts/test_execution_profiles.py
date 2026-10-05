@@ -52,7 +52,7 @@ class ProfileContractTests(unittest.TestCase):
     def test_codex_table_matches_project_policy(self) -> None:
         # Codex 값은 기존 정책의 회귀 기준이다.
         table = ep.RUNTIME_MODEL_TABLES["codex"]
-        self.assertEqual({"model": "gpt-5.6-luna", "effort": "high"}, table["economy_high"])
+        self.assertEqual({"model": "gpt-6.1-sol", "effort": "high"}, table["economy_high"])
         self.assertEqual({"model": "gpt-6-astra", "effort": "high"}, table["review_high"])
         self.assertEqual({"model": "gpt-6-astra", "effort": "medium"}, table["quality_high"])
         self.assertEqual({"model": "gpt-6-astra", "effort": "high"}, table["quality_xhigh"])

@@ -227,7 +227,7 @@ def role_execution_policy(
             "agent_profile": "economy_high",
             "repair_profile": "economy_high",
             "escalation_profile": "quality_high",
-            "scope": "Python이 이상 후보와 문맥 패킷을 만들고 Luna high가 의미를 판정",
+            "scope": "Python이 이상 후보와 문맥 패킷을 만들고 economy_high 에이전트가 의미를 판정",
         },
         "source_mapper": {
             "executor": "hybrid",
@@ -235,7 +235,7 @@ def role_execution_policy(
             "agent_profile": "economy_high",
             "repair_profile": "economy_high",
             "escalation_profile": "quality_high",
-            "scope": "Python 인벤토리·안정 ID 뒤 Luna high가 자료 간 의미 대응을 판정",
+            "scope": "Python 인벤토리·안정 ID 뒤 economy_high 에이전트가 자료 간 의미 대응을 판정",
         },
         "writer": {
             "executor": "subagent",

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -58,6 +60,31 @@ class PrepareTranscriptReviewTests(unittest.TestCase):
                 with self.assertRaises(ptr.PreparationError) as raised:
                     ptr.extract_handout_lines(pdf)
             self.assertIn("이미지형 PDF", str(raised.exception))
+
+    def test_pdf_pages_without_text_are_reported_not_skipped_silently(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf = self.write(root, "slides.pdf", "not really a pdf")
+            segments = self.write(root, "segments.json", '{"segments": [{"start": 0, "end": 1, "text": "공진 주파수", "avg_logprob": -2}]}')
+            errors = io.StringIO()
+            with (
+                patch.object(ptr, "_extract_pdf_pypdf", return_value=["공진 주파수", "", "공진 주파수"]),
+                contextlib.redirect_stderr(errors),
+            ):
+                result = ptr.run(
+                    ptr.build_parser().parse_args(
+                        ["--handout", str(pdf), "--segments", str(segments), "--output-dir", str(root / "out")]
+                    )
+                )
+            source_id = ptr.source_id_for_hash(ptr.sha256_file(pdf))
+            self.assertIn("slides.pdf의 p.2에서 글자를", errors.getvalue())
+            term_payload = json.loads(Path(result["term_candidates"]).read_text(encoding="utf-8"))
+            self.assertEqual({source_id: [2]}, term_payload["pages_without_text"])
+            manifest_path = Path(result["review_packet_manifest"])
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual({source_id: [2]}, manifest["pages_without_text"])
+            packet = json.loads((manifest_path.parent / manifest["packets"][0]["path"]).read_text(encoding="utf-8"))
+            self.assertEqual({source_id: [2]}, packet["handout_pages_without_text"])
 
     def test_review_flags_confidence_duplicate_assessment_and_number(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -161,7 +161,7 @@ flowchart LR
 | 실행 프로필 | 서브 에이전트 선언 | Codex 모델 / effort | Claude Code 모델 / effort |
 |---|---|---|---|
 | `local_python` | 없음(모델 호출 없음) | — | — |
-| `economy_high` | `study_note_worker` | `gpt-5.6-luna` / `high` | `claude-sonnet-5` / `high` |
+| `economy_high` | `study_note_worker` | `gpt-6.1-sol` / `high` | `claude-sonnet-5` / `high` |
 | `review_high` | `faithful_note_reviewer` | `gpt-6-astra` / `high` | `claude-opus-5` / `high` |
 | `quality_high` | `quality_note_worker` | `gpt-6-astra` / `medium` | `claude-opus-5` / `high` |
 | `quality_xhigh` | `deep_note_reviewer` | `gpt-6-astra` / `high` | `claude-opus-5` / `xhigh` |

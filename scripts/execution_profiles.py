@@ -63,7 +63,7 @@ EXECUTION_PROFILES: dict[str, dict[str, Any]] = {
 # Claude 모델표는 유지한다. 모델 간 비용·속도 우위를 가정하지 않는다.
 RUNTIME_MODEL_TABLES: dict[str, dict[str, dict[str, str]]] = {
     "codex": {
-        "economy_high": {"model": "gpt-5.6-luna", "effort": "high"},
+        "economy_high": {"model": "gpt-6.1-sol", "effort": "high"},
         "review_high": {"model": "gpt-6-astra", "effort": "high"},
         "quality_high": {"model": "gpt-6-astra", "effort": "medium"},
         "quality_xhigh": {"model": "gpt-6-astra", "effort": "high"},

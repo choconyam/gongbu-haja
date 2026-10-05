@@ -1,6 +1,6 @@
 name = "study_note_worker"
 description = "Runs bounded transcript review and source mapping after deterministic Python preprocessing; does not author notes."
-model = "gpt-5.6-luna"
+model = "gpt-6.1-sol"
 model_reasoning_effort = "high"
 developer_instructions = """
 Read only the assigned role prompt, evidence packet, predecessor artifacts, and output contract.

@@ -454,10 +454,22 @@ class ManageRunTests(unittest.TestCase):
             migrated = json.loads(state_file.read_text(encoding="utf-8"))
             self.assertEqual(3, migrated["schema_version"])
             self.assertEqual("codex", migrated["runtime"])
-            self.assertEqual("gpt-5.6-luna", migrated["runtime_model_table"]["economy_high"]["model"])
+            self.assertEqual("gpt-6.1-sol", migrated["runtime_model_table"]["economy_high"]["model"])
             self.assertEqual(1, migrated["review_cycle"])
             self.assertEqual(1, migrated["roles"]["final_reviewer"]["max_attempts"])
             self.assertEqual([], migrated["cost_usage"]["premium_final_reviews"])
+
+    def test_role_scopes_do_not_name_runtime_models(self) -> None:
+        # 역할 설명은 프로필 계약만 말한다. 실제 모델은 런타임 표가 정하므로 이름을 박아 두면 틀린 안내가 된다.
+        from scripts.execution_profiles import FORBIDDEN_MODELS, RUNTIME_MODEL_TABLES
+
+        models = [entry["model"] for table in RUNTIME_MODEL_TABLES.values() for entry in table.values()]
+        models += [model for names in FORBIDDEN_MODELS.values() for model in names]
+        codenames = {part for model in models for part in model.lower().split("-") if part.isalpha() and part not in {"gpt", "claude"}}
+        for mode in ("faithful", "deep"):
+            for role, policy in mr.role_execution_policy(mode).items():
+                with self.subTest(mode=mode, role=role):
+                    self.assertFalse([name for name in codenames if name in policy["scope"].lower()])
 
     def test_execution_policy_is_mode_aware_and_prefers_python_first(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -486,7 +498,7 @@ class ManageRunTests(unittest.TestCase):
             self.assertEqual("codex", state["runtime"])
             self.assertNotIn("codex_model", state["execution_profiles"]["economy_high"])
             table = state["runtime_model_table"]
-            self.assertEqual({"agent": "study_note_worker", "model": "gpt-5.6-luna", "effort": "high"}, table["economy_high"])
+            self.assertEqual({"agent": "study_note_worker", "model": "gpt-6.1-sol", "effort": "high"}, table["economy_high"])
             self.assertEqual({"agent": "faithful_note_reviewer", "model": "gpt-6-astra", "effort": "high"}, table["review_high"])
             self.assertEqual({"agent": "quality_note_worker", "model": "gpt-6-astra", "effort": "medium"}, table["quality_high"])
             self.assertEqual({"agent": "deep_note_reviewer", "model": "gpt-6-astra", "effort": "high"}, table["quality_xhigh"])

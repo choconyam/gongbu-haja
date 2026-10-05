@@ -17,7 +17,7 @@
 
   | 프로필 | Codex | Claude Code |
   |---|---|---|
-  | `economy_high` | `gpt-5.6-luna` / `high` | `claude-sonnet-5` / `high` |
+  | `economy_high` | `gpt-6.1-sol` / `high` | `claude-sonnet-5` / `high` |
   | `review_high` | `gpt-6-astra` / `high` | `claude-opus-5` / `high` |
   | `quality_high` | `gpt-6-astra` / `medium` | `claude-opus-5` / `high` |
   | `quality_xhigh` | `gpt-6-astra` / `high` | `claude-opus-5` / `xhigh` |

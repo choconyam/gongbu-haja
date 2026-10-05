@@ -203,6 +203,11 @@ def extract_pdf_pages(path: Path) -> list[str]:
 
 
 def extract_handout_lines(path: Path) -> list[HandoutLine]:
+    return extract_handout(path)[0]
+
+
+def extract_handout(path: Path) -> tuple[list[HandoutLine], list[int]]:
+    """교안 줄과, PDF에서 글자를 하나도 뽑지 못한 쪽 번호(그림·스캔 쪽)를 돌려준다."""
     resolved = path.expanduser().resolve()
     if not resolved.is_file():
         raise PreparationError(f"교안 파일이 없습니다: {resolved}")
@@ -217,7 +222,7 @@ def extract_handout_lines(path: Path) -> list[HandoutLine]:
         for page_number, page_text in enumerate(pages, start=1):
             for line_number, line in enumerate(page_text.splitlines(), start=1):
                 lines.append(HandoutLine(str(resolved), source_hash, source_id, page_number, line_number, line.strip()))
-        return lines
+        return lines, [number for number, text in enumerate(pages, start=1) if not text.strip()]
 
     try:
         text = resolved.read_text(encoding="utf-8-sig")
@@ -230,7 +235,7 @@ def extract_handout_lines(path: Path) -> list[HandoutLine]:
         if WEBVTT_RE.match(value) or TIMESTAMP_LINE_RE.match(value) or value.isdigit():
             continue
         lines.append(HandoutLine(str(resolved), source_hash, source_id, None, line_number, value))
-    return lines
+    return lines, []
 
 
 def _candidate_pattern_reasons(term: str, line: str) -> list[str]:
@@ -664,15 +669,26 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     prefix = re.sub(r"[^A-Za-z0-9가-힣_.-]+", "_", args.prefix.strip()) or "review"
     handout_lines: list[HandoutLine] = []
     source_map: dict[str, dict[str, str]] = {}
+    pages_without_text: dict[str, list[int]] = {}
     seen_sources: set[str] = set()
     for raw_path in args.handout:
         path = raw_path.expanduser().resolve()
         if str(path) not in seen_sources:
             seen_sources.add(str(path))
-            handout_lines.extend(extract_handout_lines(path))
+            lines, missing_pages = extract_handout(path)
+            handout_lines.extend(lines)
             source_hash = sha256_file(path)
             source_id = source_id_for_hash(source_hash)
             source_map[source_id] = {"path": str(path), "sha256": source_hash}
+            if missing_pages:
+                # 그림·스캔 쪽의 용어는 교정 후보에 들어가지 않으므로 조용히 넘기지 않는다.
+                pages_without_text[source_id] = missing_pages
+                print(
+                    f"[주의] 교안 {path.name}의 {', '.join(f'p.{page}' for page in missing_pages)}에서 글자를 "
+                    "뽑지 못했습니다(그림·스캔 쪽). 이 쪽에만 나오는 용어는 교정 후보에 없으니 검수할 때 해당 쪽을 "
+                    "이미지로 직접 확인하십시오.",
+                    file=sys.stderr,
+                )
     # global 후보는 로컬/Python cache로 남기고, packet에는 이 pool에서 현재
     # target과 겹치는 후보만 소수 복사한다.
     candidate_pool = extract_term_candidates(handout_lines, max(args.max_candidates, 10_000))
@@ -684,6 +700,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "semantic_status": "candidates_only",
         "replacement_applied": False,
         "sources": source_map,
+        "pages_without_text": pages_without_text,
         "summary": {"source_count": len(source_map), "line_count": len(handout_lines), "candidate_count": len(candidates)},
         "candidates": candidates,
     }
@@ -734,6 +751,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "handout_excerpts": packet["handout_excerpts"],
             "related_term_candidates": related_terms,
         }
+        if pages_without_text:
+            packet_document["handout_pages_without_text"] = pages_without_text
         packet_path = packet_dir / f"{packet_id}.json"
         _json_write(packet_path, packet_document)
         relative_path = packet_path.relative_to(output_dir).as_posix()
@@ -760,6 +779,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "model_input": False,
         "semantic_status": "anomaly_candidates_only",
         "sources": source_map,
+        "pages_without_text": pages_without_text,
         "source_hashes": {"segments_json": segments_hash, "handout_source_ids": sorted(source_map)},
         "summary": {
             "segment_count": len(segments),
