@@ -87,6 +87,8 @@ REQUIRED_PRIVATE_GITIGNORE_PATTERNS = (
 )
 
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+# 로컬 전용 파일(.gitignore). 저장소 사본(CI·다른 사람의 클론)에는 없으므로 참조가 있어도 깨진 참조로 보지 않는다.
+LOCAL_ONLY_REFERENCES = frozenset({"DEVLOG.md"})
 BACKTICK_PATH_RE = re.compile(r"`([^`\n]+\.(?:md|py))`")
 
 
@@ -158,7 +160,7 @@ def validate_references(path: Path, text: str, report: Report) -> None:
         if reference is None or any(token in reference for token in ("[", "]", "*")):
             continue
         target = (path.parent / reference).resolve()
-        if not target.exists():
+        if not target.exists() and target.name not in LOCAL_ONLY_REFERENCES:
             report.add(
                 "error",
                 "broken-reference",
