@@ -7,7 +7,7 @@ description: |
   학습노트 제작 절차를 시작하지 않는다.
 license: MIT
 metadata:
-  version: "1.8.0"
+  version: "1.8.1"
 ---
 
 # gongbu-haja (공부하자)
