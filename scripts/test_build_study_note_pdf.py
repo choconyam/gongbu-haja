@@ -97,6 +97,24 @@ class PublicTextTests(unittest.TestCase):
         self.assertIn("```markdown\n## 후속 역할 인계 메모\n```", text)
         self.assertIn("끝 문단.", text)
 
+    def test_html_comments_in_code_examples_are_kept(self) -> None:
+        # HTML·XML 과목의 코드 예시 속 주석은 본문이다. 지우는 것은 코드 밖의 추적 주석뿐이다.
+        source = (
+            "# HTML\n\n<!-- units: handout-p03 -->\n주석은 `<!-- 내용 -->`처럼 쓴다. <!-- units: handout-p04 -->\n\n"
+            "```html\n<!-- 주석 예시 -->\n<p>hi</p>\n```\n\n"
+            "~~~xml\n<!-- XML 주석 -->\n~~~\n\n"
+            "- 목록 안 예시\n\n    ```html\n    <!-- 목록 속 주석 -->\n    ## 후속 역할 인계 메모\n    ```\n\n"
+            "<!--\n```html\n<b>주석으로 막아 둔 코드</b>\n```\n-->\n끝 문단.\n"
+        )
+        text = builder.public_text(source)
+        self.assertIn("```html\n<!-- 주석 예시 -->\n<p>hi</p>\n```", text)
+        self.assertIn("~~~xml\n<!-- XML 주석 -->\n~~~", text)
+        self.assertIn("주석은 `<!-- 내용 -->`처럼 쓴다.", text)
+        self.assertIn("    <!-- 목록 속 주석 -->\n    ## 후속 역할 인계 메모\n    ```", text)
+        self.assertIn("끝 문단.", text)
+        self.assertNotIn("units:", text)
+        self.assertNotIn("주석으로 막아 둔 코드", text)
+
     def test_two_memos_without_part_boundary_stop_instead_of_dropping_text(self) -> None:
         joined = SAMPLE + "\n## 2. 다음 부분\n\n사라지면 안 되는 본문.\n\n## 후속 역할 인계 메모\n\n둘째 메모\n"
         with self.assertRaises(builder.HandoffMemoError):

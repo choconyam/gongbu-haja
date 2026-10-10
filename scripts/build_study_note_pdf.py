@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """학습노트 원고를 학생용 Markdown 또는 A4 PDF로 결정적으로 출력한다.
 
-조판은 내용을 바꾸지 않는다. 이 스크립트는 `<!-- ... -->` 추적 주석과 원고 끝의
-`## 후속 역할 인계 메모` 절만 걷어내고 나머지 문장·표·목록을 그대로 내보낸다. 진도별 누적
+조판은 내용을 바꾸지 않는다. 이 스크립트는 코드 밖의 `<!-- ... -->` 추적 주석과 원고 끝의
+`## 후속 역할 인계 메모` 절만 걷어내고 나머지 문장·표·목록·코드를 그대로 내보낸다. 진도별 누적
 원고는 부분 경계마다 그 부분의 메모만 지운다. 한 강의마다 조판 에이전트를 부르지 않기 위해
 만든 공통 빌더라서 과목·차시·요약만 인자로 받는다.
 
@@ -87,11 +87,16 @@ FONT_CANDIDATES = (
     ("malgun.ttf", "malgunbd.ttf", "malgun.ttf", "malgunbd.ttf"),
 )
 COMMENT_RE = re.compile(r"[ \t]*<!--.*?-->[ \t]*\n?", re.DOTALL)
+# 코드 블록 밖 본문에서 먼저 나오는 인라인 코드 또는 추적 주석. 인라인 코드 속 `<!-- -->`는 예시라 남긴다.
+PROSE_TOKEN_RE = re.compile(
+    r"(?P<code>(?<!`)(?P<tick>`+)(?!`)[^\n]*?(?<!`)(?P=tick)(?!`))|(?P<comment>" + COMMENT_RE.pattern + ")", re.DOTALL
+)
 # 인계 메모는 원고(누적 원고는 각 부분)의 마지막 절이다. 이 제목부터 그 끝까지 학생용 출력에서 빠진다.
 HANDOFF_MARKER = "## 후속 역할 인계 메모"
 HANDOFF_RE = re.compile(r"#{1,6}[ \t]+후속 역할 인계 메모(?:[ \t].*)?")
 PART_BOUNDARY_RE = re.compile(r"^[ \t]*" + re.escape(MARKDOWN_PART_BOUNDARY) + r"[ \t]*$", re.MULTILINE)
-FENCE_RE = re.compile(r" {0,3}(`{3,}|~{3,})")
+# 목록 안 코드 블록은 네 칸 이상 들여 쓰기도 하고, 노션·PDF 변환도 들여쓰기와 관계없이 코드로 그린다.
+FENCE_RE = re.compile(r"[ \t]*(`{3,}|~{3,})")
 
 
 class HandoffMemoError(ValueError):
@@ -421,23 +426,64 @@ def markdown_to_flowables(text: str, styles: dict[str, ParagraphStyle], width: f
     return output
 
 
+def step_fence(fence: str | None, line: str) -> tuple[bool, str | None]:
+    """줄 하나가 코드 블록(펜스 줄 포함)에 속하는지와, 그 줄 다음의 열린 펜스."""
+    stripped = line.rstrip("\r\n")
+    opener = FENCE_RE.match(stripped)
+    if not opener:
+        return fence is not None, fence
+    run = opener.group(1)
+    if fence is None:
+        return True, run
+    if run[0] == fence[0] and len(run) >= len(fence) and stripped.strip() == run:
+        return True, None
+    return True, fence
+
+
 def handoff_lines(lines: list[str]) -> list[int]:
     """코드 블록 밖에 있는 인계 메모 제목 줄의 위치. 본문 문장이나 코드 속 같은 문구는 세지 않는다."""
     found: list[int] = []
     fence: str | None = None
     for index, line in enumerate(lines):
-        stripped = line.rstrip("\r\n")
-        opener = FENCE_RE.match(stripped)
-        if opener:
-            run = opener.group(1)
-            if fence is None:
-                fence = run
-            elif run[0] == fence[0] and len(run) >= len(fence) and stripped.strip() == run:
-                fence = None
-            continue
-        if fence is None and HANDOFF_RE.fullmatch(stripped.strip()):
+        in_code, fence = step_fence(fence, line)
+        if not in_code and HANDOFF_RE.fullmatch(line.strip()):
             found.append(index)
     return found
+
+
+def strip_comments(markdown: str) -> str:
+    """코드 블록·인라인 코드 밖의 `<!-- ... -->` 추적 주석만 지운다.
+
+    HTML·XML 과목의 코드 예시에 든 주석은 학생이 봐야 하는 본문이라 그대로 둔다. 코드 밖에서는
+    COMMENT_RE 그대로 지우므로 여러 줄 주석이나 주석으로 막아 둔 코드 블록도 전처럼 통째로 빠진다.
+    """
+    out: list[str] = []
+    fence: str | None = None
+    pos = 0
+    while pos < len(markdown):
+        end = markdown.find("\n", pos) + 1 or len(markdown)
+        in_code, fence = step_fence(fence, markdown[pos:end])
+        if in_code:
+            out.append(markdown[pos:end])
+            pos = end
+            continue
+        while pos < end:
+            line = markdown[pos:end]
+            token = PROSE_TOKEN_RE.search(markdown, pos) if "`" in line or "<!--" in line else None
+            if token is None or token.start() >= end:
+                out.append(line)
+                pos = end
+                break
+            out.append(markdown[pos : token.start()])
+            if token.group("code"):
+                out.append(token.group("code"))
+                pos = token.end()
+                continue
+            pos = token.end()
+            if markdown[pos - 1] == "\n":
+                break  # 주석이 줄 끝까지 지웠으면 다음 줄은 펜스 여부부터 다시 본다.
+            end = markdown.find("\n", pos) + 1 or len(markdown)
+    return "".join(out)
 
 
 def strip_handoff(part: str) -> str:
@@ -455,12 +501,12 @@ def strip_handoff(part: str) -> str:
 
 
 def public_text(markdown: str) -> str:
-    """추적 주석과 내부 인계 메모를 제거한 학생용 본문.
+    """추적 주석과 내부 인계 메모를 제거한 학생용 본문. 코드 속 HTML 주석은 남긴다.
 
     compose가 넣은 부분 경계마다 메모를 따로 지우므로 앞부분의 메모 때문에 뒷부분 본문이
     사라지지 않는다.
     """
-    parts = [strip_handoff(COMMENT_RE.sub("", part)).strip() for part in PART_BOUNDARY_RE.split(markdown)]
+    parts = [strip_handoff(strip_comments(part)).strip() for part in PART_BOUNDARY_RE.split(markdown)]
     return "\n\n".join(part for part in parts if part) + "\n"
 
 

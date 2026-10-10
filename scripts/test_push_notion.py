@@ -170,6 +170,15 @@ class ConvertTests(unittest.TestCase):
         self.assertNotIn("units:", dumped)
         self.assertNotIn("학생용에는", dumped)
 
+    def test_html_comments_in_code_examples_reach_notion(self) -> None:
+        note = pn.convert("# 과목A 1주차 — HTML\n\n<!-- units: p1 -->\n주석은 `<!-- 내용 -->`로 쓴다.\n\n"
+                          "```html\n<!-- 주석 예시 -->\n<p>hi</p>\n```\n")
+        code = next(block for block in note.blocks if block["type"] == "code")
+        self.assertEqual("<!-- 주석 예시 -->\n<p>hi</p>", texts(code))
+        self.assertIn({"type": "text", "text": {"content": "<!-- 내용 -->"}, "annotations": {"code": True}},
+                      note.blocks[0]["paragraph"]["rich_text"])
+        self.assertNotIn("units:", json.dumps(note.blocks, ensure_ascii=False))
+
     def test_rich_text_marks_bold_code_math_links_and_uncertainty(self) -> None:
         problems: list[str] = []
         items = pn.rich_text("**굵게** `코드` $x^2$ [사이트](https://example.com) [확인 필요] [노트](a.md)", problems)
