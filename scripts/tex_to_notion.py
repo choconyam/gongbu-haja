@@ -464,7 +464,8 @@ BLOCK_RE = re.compile(
     r"|\\item\b"
 )
 # 독립 수식(`$$…$$`, `\[…\]`)도 한 덩어리로 읽어야 `$`의 짝이 어긋나지 않는다.
-MATH_OPEN_RE = re.compile(r"\$\$|\\\[|(?<!\\)\$|\\\(")
+# `\\`·`\$`처럼 백슬래시로 시작하는 두 글자는 통째로 건너뛴다. 그래야 `\\[3pt]`의 `\[`를 독립 수식으로 읽지 않는다.
+MATH_OPEN_RE = re.compile(r"\$\$|\\\[|\$|\\\(|\\.", re.S)
 MATH_CLOSE = {"$$": "$$", "\\[": "\\]", "$": "$", "\\(": "\\)"}
 
 
@@ -491,7 +492,10 @@ def inline_math_spans(tex: str) -> list[tuple[int, int]]:
     spans: list[tuple[int, int]] = []
     index = 0
     while match := MATH_OPEN_RE.search(tex, index):
-        closer = MATH_CLOSE[match.group()]
+        closer = MATH_CLOSE.get(match.group())
+        if closer is None:
+            index = match.end()
+            continue
         end = math_end(tex, match.end(), closer)
         if end < 0:
             break

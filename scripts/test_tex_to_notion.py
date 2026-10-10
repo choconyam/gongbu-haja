@@ -118,6 +118,20 @@ class ConvertTexTests(unittest.TestCase):
         self.assertEqual([r"\left[\begin{smallmatrix}2&1\\0&4\end{smallmatrix}\right]",
                           r"\begin{pmatrix}1\\2\end{pmatrix}"], expressions)
 
+    def test_row_spacing_before_inline_matrix_is_not_display_math(self) -> None:
+        # 앞 식의 `\\[3pt]`를 독립 수식 `\[`로 읽으면 뒤 인라인 수식의 범위를 잃어 행렬 환경에서 문단이 끊겼다.
+        note = Path(self.temp.name) / "spacing.tex"
+        note.write_text("\\documentclass{article}\n\\begin{document}\n\\gongbucover{과목}{01 · 주제}{요약}\n"
+                        "\\begin{align}\na&=b\\\\[3pt]\nc&=d\n\\end{align}\n"
+                        "교안의 \\(A=\\begin{bmatrix}-1&1&0\\\\0&-1&1\\end{bmatrix}\\)로 계산하면\n\\end{document}\n",
+                        encoding="utf-8")
+        converted = tn.convert_tex(note)
+        self.assertEqual([], converted.problems)
+        self.assertEqual(["equation", "paragraph"], [block["type"] for block in converted.blocks])
+        items = converted.blocks[1]["paragraph"]["rich_text"]
+        self.assertEqual(["text", "equation", "text"], [item["type"] for item in items])
+        self.assertEqual(r"A=\begin{bmatrix}-1&1&0\\0&-1&1\end{bmatrix}", items[1]["equation"]["expression"])
+
     def test_math_inside_text_inside_inline_math_is_kept_whole(self) -> None:
         items = tn.inline_items(r"열공간 \(C(A)=\operatorname{span}\{\text{\(A\)의 열}\}\)이고 $x=\text{$y$일 때}$다.",
                                 {"problems": []})
