@@ -86,10 +86,12 @@ FONT_CANDIDATES = (
     ("HANBatang.ttf", "HANBatangB.ttf", "Hancom Gothic Regular.ttf", "Hancom Gothic Bold.ttf"),
     ("malgun.ttf", "malgunbd.ttf", "malgun.ttf", "malgunbd.ttf"),
 )
-COMMENT_RE = re.compile(r"[ \t]*<!--.*?-->[ \t]*\n?", re.DOTALL)
-# 코드 블록 밖 본문에서 먼저 나오는 인라인 코드 또는 추적 주석. 인라인 코드 속 `<!-- -->`는 예시라 남긴다.
+# 코드 블록 밖 본문에서 먼저 나오는 인라인 코드 또는 추적 주석(앞뒤 공백 포함). 인라인 코드 속
+# `<!-- -->`는 예시라 남긴다. 주석 뒤 줄바꿈을 지울지는 strip_comments가 줄 모양을 보고 정한다.
 PROSE_TOKEN_RE = re.compile(
-    r"(?P<code>(?<!`)(?P<tick>`+)(?!`)[^\n]*?(?<!`)(?P=tick)(?!`))|(?P<comment>" + COMMENT_RE.pattern + ")", re.DOTALL
+    r"(?P<code>(?<!`)(?P<tick>`+)(?!`)[^\n]*?(?<!`)(?P=tick)(?!`))"
+    r"|(?P<comment>(?P<lead>[ \t]*)<!--.*?-->(?P<trail>[ \t]*))",
+    re.DOTALL,
 )
 # 인계 메모는 원고(누적 원고는 각 부분)의 마지막 절이다. 이 제목부터 그 끝까지 학생용 출력에서 빠진다.
 HANDOFF_MARKER = "## 후속 역할 인계 메모"
@@ -454,8 +456,9 @@ def handoff_lines(lines: list[str]) -> list[int]:
 def strip_comments(markdown: str) -> str:
     """코드 블록·인라인 코드 밖의 `<!-- ... -->` 추적 주석만 지운다.
 
-    HTML·XML 과목의 코드 예시에 든 주석은 학생이 봐야 하는 본문이라 그대로 둔다. 코드 밖에서는
-    COMMENT_RE 그대로 지우므로 여러 줄 주석이나 주석으로 막아 둔 코드 블록도 전처럼 통째로 빠진다.
+    HTML·XML 과목의 코드 예시에 든 주석은 학생이 봐야 하는 본문이라 그대로 둔다. 주석만 있는 줄은
+    줄바꿈까지 지우고, 문장 끝 주석은 줄바꿈을 남겨 앞뒤 줄·문단이 붙지 않게 한다. 단어 사이 주석은
+    앞뒤에 공백이 있었으면 한 칸으로 줄인다. 여러 줄 주석이나 주석으로 막아 둔 코드 블록은 통째로 빠진다.
     """
     out: list[str] = []
     fence: str | None = None
@@ -467,22 +470,35 @@ def strip_comments(markdown: str) -> str:
             out.append(markdown[pos:end])
             pos = end
             continue
+        kept: list[str] = []  # 이 줄에서 남길 조각
+        blank = True  # 지금까지 남긴 조각이 공백뿐인가
         while pos < end:
-            line = markdown[pos:end]
-            token = PROSE_TOKEN_RE.search(markdown, pos) if "`" in line or "<!--" in line else None
+            rest = markdown[pos:end]
+            token = PROSE_TOKEN_RE.search(markdown, pos) if "`" in rest or "<!--" in rest else None
             if token is None or token.start() >= end:
-                out.append(line)
+                kept.append(rest)
                 pos = end
                 break
-            out.append(markdown[pos : token.start()])
-            if token.group("code"):
-                out.append(token.group("code"))
-                pos = token.end()
-                continue
+            text = markdown[pos : token.start()]
+            if text:
+                kept.append(text)
+                blank = blank and not text.strip()
             pos = token.end()
-            if markdown[pos - 1] == "\n":
-                break  # 주석이 줄 끝까지 지웠으면 다음 줄은 펜스 여부부터 다시 본다.
-            end = markdown.find("\n", pos) + 1 or len(markdown)
+            if token.group("code"):
+                kept.append(token.group("code"))
+                blank = False
+                continue
+            end = markdown.find("\n", pos) + 1 or len(markdown)  # 여러 줄 주석이면 끝난 줄로 옮긴다.
+            if markdown[pos:end].strip():
+                if blank:
+                    kept.append(token.group("lead"))  # 줄 첫머리 주석: 들여쓰기만 남긴다.
+                elif (token.group("lead") or token.group("trail")) and kept[-1] != " ":
+                    kept.append(" ")  # 주석이 이어 붙어 있어도 공백은 한 칸만 남긴다.
+            elif blank:
+                kept, pos = [], end  # 주석만 있는 줄은 줄바꿈까지 지운다. 다음 줄은 펜스 여부부터 본다.
+            elif kept[-1] == " ":
+                kept.pop()  # 문장 끝 주석은 앞 공백과 함께 지우고 줄바꿈은 남긴다.
+        out.extend(kept)
     return "".join(out)
 
 

@@ -115,6 +115,22 @@ class PublicTextTests(unittest.TestCase):
         self.assertNotIn("units:", text)
         self.assertNotIn("주석으로 막아 둔 코드", text)
 
+    def test_trailing_comment_keeps_line_breaks(self) -> None:
+        # 문장 끝 추적 주석을 지워도 줄바꿈은 남아 앞뒤 문단·줄이 붙지 않는다. 주석만 있는 줄은 빈 줄을 남기지 않는다.
+        source = (
+            "# 노트\n\n문장이다. <!-- units: p1 -->\n\n다음 문단.\n"
+            "따옴표 <!-- units: p2 -->\n끝 줄.\n\n"
+            "앞 <!-- units: p3 --> 뒤, 앞<!-- units: p4 -->뒤.\n"
+            "<!-- units: p5 -->\n"
+            "- 항목\n\n  <!-- units: p6 --> 둘째 문단.\n\n"
+            "문장 <!-- 여러\n줄 주석 -->\n마지막 줄.\n"
+        )
+        self.assertEqual(
+            "# 노트\n\n문장이다.\n\n다음 문단.\n따옴표\n끝 줄.\n\n앞 뒤, 앞뒤.\n- 항목\n\n  둘째 문단.\n\n문장\n마지막 줄.\n",
+            builder.public_text(source),
+        )
+        self.assertEqual("문장\r\n\r\n다음\r\n", builder.strip_comments("문장 <!-- units: p1 -->\r\n\r\n다음\r\n"))
+
     def test_two_memos_without_part_boundary_stop_instead_of_dropping_text(self) -> None:
         joined = SAMPLE + "\n## 2. 다음 부분\n\n사라지면 안 되는 본문.\n\n## 후속 역할 인계 메모\n\n둘째 메모\n"
         with self.assertRaises(builder.HandoffMemoError):

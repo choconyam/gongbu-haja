@@ -179,6 +179,10 @@ class ConvertTests(unittest.TestCase):
                       note.blocks[0]["paragraph"]["rich_text"])
         self.assertNotIn("units:", json.dumps(note.blocks, ensure_ascii=False))
 
+    def test_trailing_comment_does_not_merge_paragraphs(self) -> None:
+        note = pn.convert("# 과목A 1주차 — 주제\n\n문장이다. <!-- units: p1 -->\n\n다음 문단.\n")
+        self.assertEqual(["문장이다.", "다음 문단."], [texts(block) for block in note.blocks if block["type"] == "paragraph"])
+
     def test_rich_text_marks_bold_code_math_links_and_uncertainty(self) -> None:
         problems: list[str] = []
         items = pn.rich_text("**굵게** `코드` $x^2$ [사이트](https://example.com) [확인 필요] [노트](a.md)", problems)
