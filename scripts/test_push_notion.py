@@ -6,13 +6,35 @@ import contextlib
 import copy
 import io
 import json
+import os
+import runpy
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from scripts import notion_dashboard as nd
 from scripts import push_notion as pn
+from scripts.test_notion_dashboard import FakeLedger
+
+_config: tempfile.TemporaryDirectory | None = None
+_environment: Any = None
+
+
+def setUpModule() -> None:
+    """학기 등록부를 읽는 코드가 실제 사용자 설정 폴더를 보지 않게 임시 폴더로 돌린다."""
+    global _config, _environment
+    _config = tempfile.TemporaryDirectory()
+    _environment = patch.dict(os.environ, {"GONGBU_HAJA_CONFIG": _config.name})
+    _environment.start()
+
+
+def tearDownModule() -> None:
+    _environment.stop()
+    _config.cleanup()
 
 NOTE = """# 과목A 1주차 — 미디어의 이해
 <!-- units: handout-p01 -->
@@ -63,9 +85,11 @@ class FakeClient:
         self.calls: list[tuple[str, str, dict | None]] = []
         self.pages: dict[str, dict] = {"01234567-89ab-cdef-0123-456789abcdef": {"id": "parent", "public_url": None}}
         self.blocks: dict[str, list[dict]] = {}
+        self.layout: dict[str, dict] = {}  # 페이지를 감싼 블록(단·토글 등)의 type과 parent
         self.clock = 0
         self.created = 0
         self.fail_on_append = False
+        self.versions: list[str | None] = []  # 요청마다 준 Notion-Version(없으면 None)
 
     def stamp(self) -> str:
         self.clock += 1
@@ -78,9 +102,10 @@ class FakeClient:
                     return page_id, block
         raise pn.NotionError("없음", 404, "object_not_found")
 
-    def request(self, method: str, path: str, body: dict | None = None) -> dict:
+    def request(self, method: str, path: str, body: dict | None = None, **kwargs: Any) -> dict:
         body = copy.deepcopy(body)
         self.calls.append((method, path, copy.deepcopy(body)))
+        self.versions.append(kwargs.get("version"))
         route = path.split("?")[0]
         target = route.split("/")[2] if route.count("/") >= 2 else ""
         if method == "GET" and route.startswith("/pages/"):
@@ -91,6 +116,12 @@ class FakeClient:
         if method == "GET" and route.endswith("/children"):
             limit = int(path.split("page_size=")[1].split("&")[0]) if "page_size=" in path else 100
             return {"results": copy.deepcopy(self.blocks.get(target, [])[:limit]), "has_more": False}
+        if method == "GET" and route.startswith("/blocks/"):  # 블록 하나(단·토글 등): parent를 같이 준다
+            if target in self.layout:
+                return {"object": "block", "id": target, **copy.deepcopy(self.layout[target])}
+            parent, block = self.owner(target)
+            kind = "page_id" if parent in self.pages else "block_id"
+            return {**copy.deepcopy(block), "parent": {"type": kind, kind: parent}}
         if method == "POST" and route == "/pages":
             self.created += 1
             page_id = f"page-{self.created}"
@@ -531,6 +562,364 @@ class TokenTests(unittest.TestCase):
                 code = pn.main(["check", str(note), "--course-dir", temporary])
             self.assertEqual(0, code)
             self.assertIn("블록:", output.getvalue())
+
+    def test_client_sends_the_requested_notion_version(self) -> None:
+        seen: list[str | None] = []
+
+        class Response:
+            def __enter__(self) -> "Response":
+                return self
+
+            def __exit__(self, *exc: Any) -> bool:
+                return False
+
+            def read(self) -> bytes:
+                return b"{}"
+
+        def opener(request, timeout):
+            seen.append(request.get_header("Notion-version"))
+            return Response()
+
+        client = pn.NotionClient("ntn" + "_" + "test", sleep=lambda seconds: None, opener=opener)
+        client.request("GET", "/pages/x")
+        client.request("PATCH", "/blocks/x/children", {"children": []}, version=pn.DASHBOARD_VERSION)
+        self.assertEqual([pn.NOTION_VERSION, "2026-03-11"], seen)
+
+
+SEMESTER_PAGE = "fedcba98-7654-3210-fedc-ba9876543210"
+OTHER_PAGE = "11111111-2222-3333-4444-555555555555"
+PARENT_ID = "01234567-89ab-cdef-0123-456789abcdef"
+URL_SEMESTER = "https://www.notion.so/semester"
+
+
+class CommandCase(unittest.TestCase):
+    """임시 과목 폴더 하나를 가짜 노션과 main()으로 돌린다. 토큰은 읽지 않는다."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.base = Path(temp.name)
+        self.course = self.base / "과목A"
+        self.note = self.course / "1주차" / "노트.md"
+        self.note.parent.mkdir(parents=True)
+        self.note.write_text(NOTE, encoding="utf-8")
+        self.client = FakeClient()
+
+    def main(self, *args: str, token: bool = True) -> tuple[int, str, str]:
+        """token=False면 토큰·클라이언트를 만들기만 해도 실패하게 해서 오프라인 명령임을 확인한다."""
+        out, err = io.StringIO(), io.StringIO()
+        if token:
+            load = patch.object(pn, "load_token", return_value="ntn" + "_" + "test")
+            make = patch.object(pn, "NotionClient", return_value=self.client)
+        else:
+            load = patch.object(pn, "load_token", side_effect=AssertionError("토큰을 읽으면 안 된다"))
+            make = patch.object(pn, "NotionClient", side_effect=AssertionError("네트워크를 쓰면 안 된다"))
+        pn._PRIVATE_SEEN.pop(self.client, None)  # 명령마다 새 프로세스처럼: 앞에서 확인해 둔 상위 페이지를 잊는다
+        with load, make, contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = pn.main([*args, "--course-dir", str(self.course)])
+        return code, out.getvalue(), err.getvalue()
+
+    def record(self) -> dict:
+        return pn.load_state(self.course)["notes"]["1주차/노트.md"]
+
+    def push(self, **options: Any) -> dict:
+        state = pn.load_state(self.course)
+        plan = pn.plan_push(self.client, self.course, self.note, state, **options)
+        self.last_action = plan.action
+        return pn.push(self.client, self.course, plan, state, "2026-10-05")
+
+    def edit_in_notion(self, page_id: str, when: str = "2026-10-06T09:00:00.000Z") -> None:
+        edited = next(block for block in self.client.blocks[page_id][1:] if block["type"] == "paragraph")
+        edited["paragraph"]["rich_text"] = [{"type": "text", "text": {"content": "노션에서 고친 문장"}}]
+        self.client.pages[page_id]["last_edited_time"] = when
+
+    def writes_since(self, calls: int) -> list[tuple]:
+        return [call for call in self.client.calls[calls:] if call[0] != "GET"]
+
+
+class DashboardHookTests(CommandCase):
+    def setUp(self) -> None:
+        super().setUp()
+        pn.setup(self.client, self.course, PARENT, "과목A")
+        refresh = patch.object(nd, "refresh_for_course", return_value="updated")
+        self.refresh = refresh.start()
+        self.addCleanup(refresh.stop)
+
+    def test_successful_push_refreshes_the_semester_dashboard(self) -> None:
+        code, out, _ = self.main("push", str(self.note))
+        self.assertEqual(0, code)
+        self.refresh.assert_called_once_with(self.client, self.course.resolve())
+        self.assertIn("학기 현황판도 갱신했습니다.", out)
+
+    def test_dashboard_failure_never_changes_the_push_result(self) -> None:
+        for error in (RuntimeError("현황판 고장"), pn.NotionError("노션 오류", 500)):
+            self.refresh.side_effect = error
+            self.note.write_text(NOTE.replace("첫째", f"첫째 {error}"), encoding="utf-8")
+            code, out, err = self.main("push", str(self.note))
+            self.assertEqual(0, code)
+            self.assertIn("올림:", out)
+            self.assertIn(f"[경고] 학기 현황판을 갱신하지 못했습니다(노트 업로드는 끝났습니다): {error}", err)
+            self.assertEqual(pn.prepare_note(self.course, self.note, pn.load_state(self.course)).content_hash,
+                             self.record()["content_sha256"])
+
+    def test_no_dashboard_dry_run_and_skip_do_not_refresh(self) -> None:
+        self.assertEqual(0, self.main("push", str(self.note), "--no-dashboard")[0])
+        self.assertEqual(0, self.main("push", str(self.note))[0])  # 바뀐 것 없음
+        self.note.write_text(NOTE.replace("첫째", "첫째 항목"), encoding="utf-8")
+        self.assertEqual(0, self.main("push", str(self.note), "--dry-run")[0])
+        self.refresh.assert_not_called()
+
+    def test_edit_in_notion_is_marked_even_in_dry_run_and_cleared_by_overwrite(self) -> None:
+        first = self.push()
+        self.edit_in_notion(first["page_id"])
+        calls = len(self.client.calls)
+        code, _, _ = self.main("push", str(self.note), "--dry-run")
+        self.assertEqual(1, code)
+        self.assertEqual("2026-10-06T09:00:00.000Z", self.record()["notion_edited_at"])
+        self.assertEqual([], self.writes_since(calls))  # 표시는 로컬 기록에만 남긴다
+        self.refresh.assert_not_called()
+        code, out, _ = self.main("push", str(self.note))
+        self.assertEqual(1, code)  # 갱신해도 종료 코드는 그대로
+        self.refresh.assert_called_once()
+        self.assertIn("학기 현황판도 갱신했습니다.", out)
+        self.assertEqual(0, self.main("push", str(self.note), "--overwrite")[0])
+        self.assertNotIn("notion_edited_at", self.record())
+
+    def test_edit_mark_is_dropped_by_blank_paragraph_skip_and_failed_replace(self) -> None:
+        first = self.push()
+        pn.update_state(self.course, lambda disk: disk["notes"]["1주차/노트.md"].update(notion_edited_at="이전 표시"))
+        self.client.store(first["page_id"], [{"type": "paragraph", "paragraph": {"rich_text": []}}])  # 고친 내용을 되돌림
+        self.client.pages[first["page_id"]]["last_edited_time"] = "2026-10-07T09:00:00.000Z"
+        self.push()
+        self.assertEqual("skip", self.last_action)
+        self.assertNotIn("notion_edited_at", self.record())
+        pn.update_state(self.course, lambda disk: disk["notes"]["1주차/노트.md"].update(notion_edited_at="이전 표시"))
+        self.note.write_text(NOTE.replace("첫째", "첫째 항목"), encoding="utf-8")
+        self.client.fail_on_append = True
+        with self.assertRaises(pn.NotionError):
+            self.push()
+        self.assertIsNone(self.record()["content_sha256"])
+        self.assertNotIn("notion_edited_at", self.record())
+
+    def test_public_ancestor_is_refused_before_any_write(self) -> None:
+        self.client.pages[PARENT_ID]["parent"] = {"type": "page_id", "page_id": "grand"}
+        self.client.pages["grand"] = {"id": "grand", "public_url": "https://someone.notion.site/grand"}
+        calls = len(self.client.calls)
+        code, _, err = self.main("push", str(self.note))
+        self.assertEqual(2, code)
+        self.assertIn("공개된 페이지 아래라 올리지 않습니다", err)
+        self.assertEqual([], self.writes_since(calls))
+        self.assertEqual({}, pn.load_state(self.course)["notes"])
+        self.refresh.assert_not_called()
+
+    def test_public_ancestor_behind_a_column_is_refused_before_any_write(self) -> None:
+        course_page = pn.load_state(self.course)["course_page_id"]
+        self.client.pages[course_page]["parent"] = {"type": "block_id", "block_id": "column"}  # 과목 페이지를 단 안에 둠
+        self.client.layout.update(column={"type": "column", "parent": {"type": "block_id", "block_id": "columns"}},
+                                  columns={"type": "column_list", "parent": {"type": "page_id", "page_id": PARENT_ID}})
+        self.client.pages[PARENT_ID]["public_url"] = "https://someone.notion.site/parent"
+        calls = len(self.client.calls)
+        code, _, err = self.main("push", str(self.note))
+        self.assertEqual(2, code)
+        self.assertIn("공개된 페이지 아래라 올리지 않습니다", err)
+        self.assertEqual([], self.writes_since(calls))
+        read = [path for method, path, _ in self.client.calls[calls:] if method == "GET"]
+        at = read.index("/blocks/column")
+        self.assertEqual([f"/pages/{course_page}", "/blocks/column", "/blocks/columns", f"/pages/{PARENT_ID}"],
+                         read[at - 1:at + 3])  # 블록 부모를 따라 품은 페이지까지 올라간다
+        self.assertEqual({}, pn.load_state(self.course)["notes"])
+        self.refresh.assert_not_called()
+        self.client.pages[PARENT_ID]["public_url"] = None
+        self.assertEqual(0, self.main("push", str(self.note))[0])  # 비공개면 단 안에서도 그대로 올린다
+        self.client.layout.pop("columns")  # 연결 권한 밖이라 읽을 수 없는 블록에서는 멈춘다
+        self.note.write_text(NOTE.replace("첫째", "첫째 항목"), encoding="utf-8")
+        self.assertEqual(0, self.main("push", str(self.note))[0])
+
+    def test_unreadable_ancestor_does_not_block_push(self) -> None:
+        self.client.pages[PARENT_ID]["parent"] = {"type": "page_id", "page_id": "outside-connection"}  # 연결 권한 밖
+        self.assertEqual(0, self.main("push", str(self.note))[0])
+        self.assertIn("1주차/노트.md", pn.load_state(self.course)["notes"])
+
+
+class SemesterSetupTests(CommandCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.client.pages[SEMESTER_PAGE] = {"id": SEMESTER_PAGE, "public_url": None, "in_trash": False,
+                                            "parent": {"type": "page_id", "page_id": PARENT_ID}}
+        self.client.pages[OTHER_PAGE] = {"id": OTHER_PAGE, "public_url": None, "in_trash": False}
+        self.ledger = FakeLedger(self.base, {
+            "version": 1, "current": "2026-2", "root_page_id": PARENT_ID,
+            "semesters": {"2026-2": {"title": "2026-2학기", "start": "2026-08-31", "weeks": 15,
+                                     "courses": [self.course.resolve().as_posix()],
+                                     "notion": {"page_id": SEMESTER_PAGE, "url": URL_SEMESTER, "anchor_block_id": "a"}}}})
+        ledger = patch.object(nd, "_ledger", return_value=self.ledger)
+        ledger.start()
+        self.addCleanup(ledger.stop)
+
+    def posts(self) -> list[dict]:
+        return [body for method, path, body in self.client.calls if method == "POST" and path == "/pages"]
+
+    def test_setup_without_link_uses_the_semester_page(self) -> None:
+        state = pn.setup(self.client, self.course, None, "과목A")
+        self.assertEqual([{"type": "page_id", "page_id": SEMESTER_PAGE}], [body["parent"] for body in self.posts()])
+        self.assertEqual(SEMESTER_PAGE, state["parent_page_id"])
+
+    def test_setup_without_link_needs_a_semester_page(self) -> None:
+        self.ledger.registry["semesters"]["2026-2"].pop("notion")
+        with self.assertRaises(pn.NotionError) as raised:
+            pn.setup(self.client, self.course, None, "과목A")
+        self.assertIn("상위 페이지 링크가 필요합니다", str(raised.exception))
+        self.assertEqual([], self.posts())
+        self.assertFalse(pn.state_path(self.course).exists())
+
+    def test_course_page_moved_under_the_semester_is_reused(self) -> None:
+        state = pn.setup(self.client, self.course, PARENT, "과목A")
+        self.push()
+        notes = pn.load_state(self.course)["notes"]
+        self.client.pages[state["course_page_id"]]["parent"] = {"type": "page_id", "page_id": SEMESTER_PAGE}  # semester move
+        posts = len(self.posts())
+        for link in (None, PARENT):  # 링크를 생략해도, 예전 링크를 다시 줘도 그대로 쓴다
+            again = pn.setup(self.client, self.course, link, "과목A")
+            self.assertEqual((state["course_page_id"], SEMESTER_PAGE), (again["course_page_id"], again["parent_page_id"]))
+        self.assertEqual(posts, len(self.posts()))
+        saved = pn.load_state(self.course)
+        self.assertEqual((notes, SEMESTER_PAGE), (saved["notes"], saved["parent_page_id"]))
+
+    def test_course_page_elsewhere_is_refused_unless_new_page(self) -> None:
+        state = pn.setup(self.client, self.course, PARENT, "과목A")
+        self.push()
+        self.client.pages[state["course_page_id"]]["parent"] = {"type": "page_id", "page_id": OTHER_PAGE}
+        before = pn.load_state(self.course)
+        with self.assertRaises(pn.NotionError) as raised:
+            pn.setup(self.client, self.course, PARENT, "과목A")
+        self.assertIn("gongbu notion semester move", str(raised.exception))
+        self.assertIn("--new-page", str(raised.exception))
+        self.assertEqual(before, pn.load_state(self.course))
+        code, _, err = self.main("setup", PARENT)
+        self.assertEqual(2, code)
+        self.assertIn("이미 다른 페이지 아래에 과목 페이지가 있습니다", err)
+        created = pn.setup(self.client, self.course, PARENT, "과목A", new_page=True)
+        self.assertNotEqual(state["course_page_id"], created["course_page_id"])
+        self.assertEqual(({}, PARENT_ID), (created["notes"], created["parent_page_id"]))
+
+    def test_setup_refuses_when_a_page_above_the_parent_is_public(self) -> None:
+        self.client.pages[PARENT_ID]["public_url"] = "https://someone.notion.site/root"  # 학기 페이지는 비공개, 그 위가 공개
+        for link in (None, URL_SEMESTER + "-" + SEMESTER_PAGE.replace("-", "")):
+            with self.assertRaises(pn.NotionError) as raised:
+                pn.setup(self.client, self.course, link, "과목A")
+            self.assertIn("상위 페이지나 그 위 페이지가 웹에 공개돼 있어", str(raised.exception))
+        self.assertIn(("GET", f"/pages/{PARENT_ID}"), [(method, path) for method, path, _ in self.client.calls])
+        self.assertEqual([], self.posts())
+        self.assertFalse(pn.state_path(self.course).exists())
+
+    def test_legacy_course_converts_in_place_without_link(self) -> None:
+        state = pn.setup(self.client, self.course, PARENT, "과목A")
+        legacy = {**state, "version": 1, "database_id": "db-1", "data_source_id": "ds-1",
+                  "notes": {"1주차/노트.md": {"page_id": "row-1", "content_sha256": "x"}}}
+        pn.save_state(self.course, legacy)
+        page = self.client.pages[state["course_page_id"]]
+        page["parent"] = {"type": "page_id", "page_id": OTHER_PAGE}  # 기록과 다른 곳에 있으면 여전히 거부한다
+        with self.assertRaises(pn.NotionError) as raised:
+            pn.setup(self.client, self.course, None, "과목A")
+        self.assertIn("이미 다른 페이지 아래에", str(raised.exception))
+        self.assertEqual(legacy, pn.load_state(self.course))
+        page["parent"] = {"type": "page_id", "page_id": PARENT_ID}  # 기록대로 예전 상위 페이지 아래
+        posts = len(self.posts())
+        code, out, _ = self.main("setup")
+        self.assertEqual(0, code)
+        self.assertEqual(posts, len(self.posts()))
+        saved = pn.load_state(self.course)
+        self.assertEqual((state["course_page_id"], PARENT_ID, {}), (saved["course_page_id"], saved["parent_page_id"], saved["notes"]))
+        self.assertFalse({"database_id", "data_source_id"} & set(saved))
+        self.assertIn("이어서 `gongbu notion semester move`를 실행하십시오", out)
+
+    def test_setup_command_refreshes_after_creating_under_the_semester(self) -> None:
+        with patch.object(nd, "refresh_for_course", return_value="updated") as refresh:
+            code, out, _ = self.main("setup")
+            self.assertEqual(0, code)
+            refresh.assert_called_once()
+            self.assertIn("학기 현황판도 갱신했습니다.", out)
+            self.assertEqual(0, self.main("setup")[0])  # 이미 있으면 다시 만들지 않고 갱신도 하지 않는다
+            refresh.assert_called_once()
+
+
+class RekeyTests(CommandCase):
+    def setUp(self) -> None:
+        super().setUp()
+        pn.setup(self.client, self.course, PARENT, "과목A")
+        self.first = self.push()
+        self.new = self.course / "1주차" / "새 노트.md"
+
+    def rekey(self, old: str, new: str) -> tuple[int, str, str]:
+        return self.main("rekey", old, new, token=False)
+
+    def test_rekey_moves_the_record_and_the_next_push_reuses_the_page(self) -> None:
+        self.new.write_text(NOTE.replace("첫째", "첫째 항목"), encoding="utf-8")
+        calls = len(self.client.calls)
+        code, out, _ = self.rekey("1주차/노트.md", str(self.new))
+        self.assertEqual(0, code)
+        self.assertIn("1주차/노트.md → 1주차/새 노트.md", out)
+        self.assertEqual(calls, len(self.client.calls))  # 네트워크 없음
+        notes = pn.load_state(self.course)["notes"]
+        self.assertEqual(["1주차/새 노트.md"], list(notes))
+        self.assertEqual(self.first, notes["1주차/새 노트.md"])
+        self.note = self.new
+        second = self.push()
+        self.assertEqual(("replace", self.first["page_id"]), (self.last_action, second["page_id"]))
+
+    def test_rekey_refusals_leave_the_records_alone(self) -> None:
+        before = pn.load_state(self.course)
+        refusals = []
+        refusals.append(self.rekey("1주차/없는 노트.md", "1주차/새 노트.md"))  # 예전 기록 없음
+        refusals.append(self.rekey("1주차/노트.md", "1주차/새 노트.md"))  # 새 파일 없음
+        self.new.write_text("# 과목A 1주차 — 주제\n\n$$\nx+1\n", encoding="utf-8")  # 닫히지 않은 수식 블록
+        refusals.append(self.rekey("1주차/노트.md", "1주차/새 노트.md"))
+        self.new.write_text(NOTE, encoding="utf-8")
+        with patch.object(pn, "prepare_note", side_effect=ValueError("닫히지 않은 인라인 수식")):  # 변환 자체가 안 됨
+            refusals.append(self.rekey("1주차/노트.md", "1주차/새 노트.md"))
+        self.assertEqual([2] * 4, [code for code, _, _ in refusals])
+        for (_, _, err), message in zip(refusals, ("옮길 노트 기록이 없습니다", "새 원고 파일이 없습니다",
+                                                   "변환 오류가 있어 옮기지 않았습니다",
+                                                   "변환 오류가 있어 옮기지 않았습니다: 닫히지 않은 인라인 수식"), strict=True):
+            self.assertIn(message, err)
+        self.assertEqual(before, pn.load_state(self.course))
+        self.note = self.new
+        self.push()
+        before = pn.load_state(self.course)
+        code, _, err = self.rekey("1주차/노트.md", "1주차/새 노트.md")  # 새 원고에 이미 기록이 있음
+        self.assertEqual(2, code)
+        self.assertIn("이미 노트 기록이 있습니다", err)
+        self.assertEqual(before, pn.load_state(self.course))
+
+
+class RunAsScriptTests(unittest.TestCase):
+    def test_gongbu_style_run_shares_one_push_notion_module(self) -> None:
+        """gongbu처럼 scripts/를 sys.path에 넣고 `__main__`으로 실행해도 notion_dashboard가 같은 모듈(같은 NotionError)을 쓴다."""
+        scripts = Path(pn.__file__).resolve().parent
+        seen: dict[str, bool] = {}
+        ledger = types.ModuleType("course_ledger")
+
+        def load_registry() -> dict:
+            seen["push_notion은 실행 중인 모듈"] = sys.modules.get("push_notion") is sys.modules.get("__main__")
+            seen["notion_dashboard도 같은 모듈"] = sys.modules["notion_dashboard"].pn is sys.modules["push_notion"]
+            return {"version": 1, "current": None, "root_page_id": None, "semesters": {}}
+
+        ledger.load_registry = load_registry
+        ledger.semester_of = lambda course_dir, registry=None: None
+        out, err = io.StringIO(), io.StringIO()
+        script = scripts / "push_notion.py"
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(sys.modules), \
+                patch.object(sys, "path", [str(scripts), *sys.path]), \
+                patch.object(sys, "argv", [str(script), "dashboard", "--preview", "--course-dir", temporary]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            for name in ("push_notion", "notion_dashboard", "course_ledger", "build_study_note_pdf", "tex_to_notion"):
+                sys.modules.pop(name, None)
+            sys.modules["course_ledger"] = ledger
+            with self.assertRaises(SystemExit) as raised:
+                runpy.run_path(str(script), run_name="__main__")
+        self.assertEqual(2, raised.exception.code)  # notion_dashboard가 낸 NotionError를 main이 잡았다
+        self.assertIn("[오류] 학기를 정하지 못했습니다", err.getvalue())
+        self.assertEqual({"push_notion은 실행 중인 모듈": True, "notion_dashboard도 같은 모듈": True}, seen)
 
 
 if __name__ == "__main__":

@@ -16,12 +16,20 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from gongbu_haja import __version__, cli, paths  # noqa: E402
 
+# 학기 목록(semesters.json)이 실제 사용자 설정 폴더에 쓰이지 않게 모든 하위 프로세스가 이 임시 폴더를 쓴다.
+CONFIG_DIR = tempfile.TemporaryDirectory()
+
+
+def tearDownModule() -> None:
+    CONFIG_DIR.cleanup()
+
 
 def cli_env(**extra: str) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items() if not key.startswith(("CLAUDE", "CODEX_"))}
     env.pop(paths.ENGINE_HOME_ENV, None)
     env["PYTHONPATH"] = str(REPO_ROOT)
     env["PYTHONIOENCODING"] = "utf-8"
+    env["GONGBU_HAJA_CONFIG"] = CONFIG_DIR.name
     env.update(extra)
     return env
 
@@ -48,6 +56,14 @@ class HelpOutputTests(unittest.TestCase):
         env.pop("PYTHONUTF8", None)
         result = run_gongbu("--help", cwd=REPO_ROOT, env=env)
         self.assertIn("과목 폴더", result.stdout)
+
+    def test_ledger_usage_names_the_ledger_id_and_force(self) -> None:
+        # 원장 강의ID(영문)는 녹음·전사 폴더의 <강의ID>(한글 가능)와 다르다. 방금 끝난 파일은 --force로 등록한다.
+        self.assertIn("course import <plan.json> [--dry-run] [--force]", cli.USAGE)
+        self.assertIn("course note <원장 강의ID> --source", cli.USAGE)
+        self.assertRegex(cli.USAGE, r"course material add <원장 강의ID> <파일> --kind [^\n]*\[--force\]")
+        self.assertNotRegex(cli.USAGE, r"course (note|material add) <강의ID>")
+        self.assertIn("<과목>/<강의ID>/", cli.USAGE)  # record의 폴더 이름은 그대로
 
 
 class EngineLocationTests(unittest.TestCase):
@@ -101,6 +117,25 @@ class ArgumentInjectionTests(unittest.TestCase):
         self.assertEqual(["next", "state.json"], argv)
         argv = cli.build_argv("run", ["init", "x", "--root", "r"], self.COURSE)
         self.assertNotIn("--state-root", argv)
+
+    def test_ledger_commands_pass_command_name_and_course_folder(self) -> None:
+        course = str(self.COURSE)
+        self.assertEqual(["status", "--course-dir", course], cli.build_argv("status", [], self.COURSE))
+        self.assertEqual(["status", "--all", "--json", "--course-dir", course],
+                         cli.build_argv("status", ["--all", "--json"], self.COURSE))
+        self.assertEqual(["course", "note", "ch05", "--source", "a.tex", "--progress", "done", "--course-dir", course],
+                         cli.build_argv("course", ["note", "ch05", "--source", "a.tex", "--progress", "done"], self.COURSE))
+        self.assertEqual(["semester", "show", "--course-dir=x"], cli.build_argv("semester", ["show", "--course-dir=x"], self.COURSE))
+        self.assertEqual(["course", "--course-dir", course], cli.build_argv("course", [], self.COURSE))
+        for command in ("status", "course", "semester"):
+            self.assertEqual(("course_ledger.py", ["show"]), cli.resolve_script(command, ["show"]))
+
+    def test_notion_course_dir_injection_covers_semester_commands(self) -> None:
+        for sub in ("setup", "check", "push", "dashboard", "semester", "rekey"):
+            with self.subTest(sub=sub):
+                self.assertEqual([sub, "x", "--course-dir", str(self.COURSE)], cli.build_argv("notion", [sub, "x"], self.COURSE))
+        self.assertEqual(["login"], cli.build_argv("notion", ["login"], self.COURSE))
+        self.assertEqual(["dashboard", "--course-dir", "y"], cli.build_argv("notion", ["dashboard", "--course-dir", "y"], self.COURSE))
 
     def test_validate_picks_script_by_target(self) -> None:
         self.assertEqual(("validate_note_output.py", ["note.md"]), cli.resolve_script("validate", ["note", "note.md"]))
@@ -220,6 +255,35 @@ class SubprocessTests(unittest.TestCase):
                 self.assertFalse(home.exists())
                 if expected == 0:
                     self.assertIn("usage:", result.stdout)
+
+    def test_status_without_ledger_exits_3_and_creates_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            course = Path(temporary)
+            (course / "b01.pdf").write_bytes(b"%PDF")
+            result = run_gongbu("status", cwd=course, expected=3)
+            self.assertIn("course init", result.stderr)
+            self.assertEqual(["b01.pdf"], [path.name for path in course.iterdir()])
+            for arguments, expected in ((["status", "--help"], 0), (["course", "--help"], 0), (["course", "init"], 2),
+                                        (["semester", "init", "--bogus"], 2), (["course"], 2)):
+                run_gongbu(*arguments, cwd=course, expected=expected)
+            self.assertEqual(["b01.pdf"], [path.name for path in course.iterdir()])
+
+    def test_course_and_semester_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, tempfile.TemporaryDirectory() as config:
+            course = Path(temporary).resolve()
+            env = cli_env(GONGBU_HAJA_CONFIG=config)
+            run_gongbu("course", "init", "--name", "과목A", "--mode", "faithful", "--materials", "handout",
+                       cwd=course, env=env)
+            self.assertTrue((course / ".gongbu" / "course.json").is_file())
+            run_gongbu("semester", "init", "2026-2", "--title", "2026-2학기", "--start", "2026-08-31", "--weeks", "15",
+                       cwd=course, env=env)
+            added = json.loads(run_gongbu("semester", "add-course", cwd=course, env=env).stdout)
+            self.assertEqual(course.as_posix(), added["course"])
+            self.assertTrue((Path(config) / "semesters.json").is_file())
+            document = json.loads(run_gongbu("status", "--all", "--json", "--today", "2026-10-10", cwd=course, env=env).stdout)
+            self.assertEqual("gongbu.status/1", document["schema"])
+            self.assertEqual(6, document["semester"]["current_week"])
+            self.assertIn("자료 충실형 · 교안만", run_gongbu("status", cwd=course, env=env).stdout)
 
     def test_setup_agents_accepts_equals_home_option(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

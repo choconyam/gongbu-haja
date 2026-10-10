@@ -114,17 +114,33 @@ def expand_macros(text: str, defined: dict[str, tuple[int, str]]) -> str:
     return text
 
 
+INPUT_RE = re.compile(r"\\input\s*\{([^}]*)\}")
+
+
+def input_target(name: str, base: Path) -> Path | None:
+    """`\\input{이름}`이 가리키는 본문 조각 파일. 공용 스타일이나 없는 파일은 None이다."""
+    name = name.strip().strip('"')
+    path = base / name
+    if path.suffix != ".tex":
+        path = path.with_suffix(".tex")
+    if "deep_note_style" in name or not path.is_file():
+        return None
+    return path
+
+
 def inline_input(text: str, base: Path) -> str:
     """본문의 `\\input{부분.tex}`을 그 파일 내용으로 바꾼다(진도별 원고)."""
     def replace(match: re.Match[str]) -> str:
-        name = match.group(1).strip().strip('"')
-        path = (base / name)
-        if path.suffix != ".tex":
-            path = path.with_suffix(".tex")
-        if "deep_note_style" in name or not path.is_file():
-            return ""
-        return strip_comments(path.read_text(encoding="utf-8-sig"))
-    return re.sub(r"\\input\s*\{([^}]*)\}", replace, text)
+        path = input_target(match.group(1), base)
+        return "" if path is None else strip_comments(path.read_text(encoding="utf-8-sig"))
+    return INPUT_RE.sub(replace, text)
+
+
+def input_paths(path: Path) -> list[Path]:
+    """원고가 `\\input`으로 끌어오는 본문 조각 파일들(변환과 같은 규칙, 한 단계)."""
+    text = strip_comments(path.read_text(encoding="utf-8-sig"))
+    found = (input_target(match.group(1), path.parent) for match in INPUT_RE.finditer(text))
+    return list(dict.fromkeys(target for target in found if target is not None))
 
 
 # ------------------------------------------------------------------ 수식 번호

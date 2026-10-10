@@ -17,7 +17,7 @@ The mode selects how far the explanation goes, not which model is used.
 
 ## Notion (optional)
 
-Notes of either mode can be pushed to Notion, one page per lecture under a course page. Deep notes keep their equation numbers and handout slides, and pushing a revised note updates the same page. The Notion token stays in the OS credential store. Setup steps are in the Korean install guide ([`docs/install.md`](docs/install.md)).
+Notes of either mode can be pushed to Notion as semester › course › lecture pages, with a dashboard at the top of the semester page showing each course's progress and your to-dos. Deep notes keep their equation numbers and handout slides, and pushing a revised note updates the same page. The Notion token stays in the OS credential store. Setup steps are in the Korean install guide ([`docs/install.md`](docs/install.md)).
 
 ## Quick start
 

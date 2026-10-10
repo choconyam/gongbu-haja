@@ -59,6 +59,7 @@ RULE_FILES = (
     "content-modes.md",
     "output-and-layout.md",
     "review-checklists.md",
+    "course-ledger.md",
 )
 
 REQUIRED_ROLE_HEADINGS = ("## 역할", "## 완료 조건")

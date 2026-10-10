@@ -8,14 +8,14 @@
 
 | 실제 요청 | 처음 읽을 지침 | 필요할 때만 추가 |
 |---|---|---|
-| 원고의 단순 오타·문구 한 곳 수정 | 대상 문장과 직접 근거, 기존 수정 계약 | 의미·수식·조건에 영향이 있으면 내용 수정 경로; 상태에 등록된 원고는 기존 변경·검수 게이트 유지 |
-| 새 노트 제작·내용 추가·내용 수정 | `note_final_rules.md`, 위 선택 모드의 진입점 | 기존 상태·명시적 관리형 실행일 때만 `agent_prompts/manager.md` |
+| 원고의 단순 오타·문구 한 곳 수정 | 대상 문장과 직접 근거, 기존 수정 계약 | 의미·수식·조건에 영향이 있으면 내용 수정 경로; 상태에 등록된 원고는 기존 변경·검수 게이트 유지; 원장이 있는 과목은 고친 뒤 `gongbu course note`로 다시 등록(`rules/course-ledger.md`) |
+| 새 노트 제작·내용 추가·내용 수정 | `note_final_rules.md`, 위 선택 모드의 진입점 | 기존 상태·명시적 관리형 실행일 때만 `agent_prompts/manager.md`; 과목 설정이 없거나 노트를 원장에 등록할 때 `rules/course-ledger.md` |
 | 기존 노트 검수만 | `note_final_rules.md`, `rules/review-checklists.md`의 해당 검수 항목 | 지적 근거가 있는 원자료 구간; 제작 파이프라인을 새로 시작하지 않음 |
 | 디자인·여백·글꼴·출력 형식만 수정 | `agent_prompts/layout_builder.md`, 선택 형식의 출력 계약 | 기존 상태를 갱신할 때만 `rules/orchestration.md`의 입력 변경·실패 반환 절 |
-| 녹음·전사만 | `rules/transcription-workflow.md`의 해당 단계, 실제 담당 역할 프롬프트 | 노트 집필은 별도 요청이 있을 때만 |
-| 노트를 노션으로 올리기 | `rules/notion-output-contract.md` | 노트 제작이 함께 필요하면 위 제작 경로 |
+| 녹음·전사만 | `rules/transcription-workflow.md`의 해당 단계, 실제 담당 역할 프롬프트 | 노트 집필은 별도 요청이 있을 때만; 원장이 있는 과목은 전사 뒤 등록(`rules/course-ledger.md`) |
+| 노트를 노션으로 올리기·학기 현황판 | `rules/notion-output-contract.md` | 노트 제작이 함께 필요하면 위 제작 경로; 학기·과목 등록은 `rules/course-ledger.md` |
 | 엔진 코드·규칙·스킬 유지보수 | `rules/repository-maintenance.md` | 변경 파일과 직접 연결된 계약·테스트 |
-| 사용법·상태·단순 질문 | 답에 필요한 명령 도움말·상태·해당 지침 절 | 위 제작·검수 경로는 실행하지 않음 |
+| 사용법·상태·단순 질문 | 답에 필요한 명령 도움말·상태·해당 지침 절; 진도·현황은 `gongbu status`(읽기 전용, 학기 전체는 `--all`) | 원장이 없다고 나오면(종료 코드 3) `rules/course-ledger.md`의 '현황과 현황판' 절; 위 제작·검수 경로는 실행하지 않음 |
 
 ## 읽기와 역할 경계
 

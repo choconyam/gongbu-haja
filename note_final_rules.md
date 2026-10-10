@@ -25,7 +25,7 @@
 
 ## 3. 선택 모드와 출력
 
-- 새 노트에서 사용자가 모드를 말하지 않았다면 제작 전에 자료 충실형(`faithful`)과 심화 이해형(`deep`) 중 선택받는다. 이미 지정된 모드로 이어 쓰거나 좁은 수정·검수만 할 때는 다시 선택을 요구하지 않는다.
+- 자료 충실형(`faithful`)과 심화 이해형(`deep`) 중 어느 모드로 만들지는 `rules/note-production-modes.md` 1절이 정한다.
 - `faithful`은 교안·교수 설명·사용자 지정 자료에 충실하게 정리하며 근거 밖 배경·새 예시·유도를 추가하지 않는다. 기본 최종 형식은 Markdown이다. 직접 제작·품질 기준은 `rules/faithful-cost-path.md`의 해당 절을 따른다.
 - `deep`은 필요한 배경·중간 사고·유도·예시를 검증해 보강한다. 기본 최종본은 PDF이고 TeX 기준 원고 하나로 집필·검수·수정한다. 역할에 해당하는 `rules/deep-output-contract.md`의 내용·수식·디자인·검수 기준을 적용한다.
 - 원본 교안이 있는 페이지별 노트는 원본 슬라이드 → 대응 설명 순서를 지키며 교수 설명을 바로 통합한다. 사용자 지정이 없다면 서로 다른 교안 페이지의 설명을 한데 합쳐 대응 관계를 흐리지 않는다. 이는 내용 대응 기준이며, 출력 페이지 나눔이나 슬라이드별 제목을 요구하지 않는다. DEEP의 실제 배치는 `rules/deep-output-contract.md`의 ‘원본 교안과 설명 배치’를 따른다. 원본 읽기와 수식·그림 검수는 텍스트 추출만으로 대신하지 않는다.
@@ -40,11 +40,12 @@
 - 요청한 산출물이 정상적으로 열리고 기준 원고와 대응해야 한다. PDF·Word는 실제 렌더를 확인하며, DEEP은 최종 모든 쪽과 밀집 수식·축소 교안의 가독성을 확인한다. 컴파일 성공만으로 시각 검수를 통과시키지 않는다.
 - 중대한 누락·왜곡·오류가 남으면 완료로 보고하지 않는다. 해결 가능한 문제는 승인 범위와 기존 복구 한도 안에서 수정·재검증하고, 해결할 수 없는 부분은 위치·근거·영향을 알린다. 확인하지 않은 검사·역할을 통과했다고 기록하지 않는다.
 - 새 제작의 선택 모드별 자체 점검·자료 대응·출력 확인은 유지한다. 실행 상태 검증은 관리형 실행에만 적용하며 직접 제작을 검증하기 위해 역할 상태를 새로 만들지 않는다. 검수만 요청한 경우에는 발견 사항과 한계를 보고하며, 수정이나 새 실행 상태 생성을 자동으로 시작하지 않는다.
+- 과목 원장(`.gongbu/course.json`)은 산출물 색인이며 실행 상태나 검수 근거가 아니다. 원장이 있는 과목은 노트를 만들거나 고친 뒤 완료 보고 전에 등록한다(`rules/course-ledger.md`).
 
 ## 문서 등록 목록 — 필독 목록 아님
 
 구조 검증용 목록이다. 실제 읽기 경로는 `AGENTS.md`와 배정된 역할의 조건부 목록으로 정한다. 내용 담당은 위 1~4절만 품질 기준으로 읽고, 아래 문서를 일괄 열지 않는다.
 
 - 역할: `agent_prompts/manager.md`, `agent_prompts/transcriber.md`, `agent_prompts/transcript_auditor.md`, `agent_prompts/source_mapper.md`, `agent_prompts/writer.md`, `agent_prompts/instructor_integrator.md`, `agent_prompts/formula_code_checker.md`, `agent_prompts/pedagogy_editor.md`, `agent_prompts/layout_builder.md`, `agent_prompts/final_reviewer.md`, `agent_prompts/maintainer.md`.
-- 세부 계약: `rules/workflow.md`, `rules/orchestration.md`, `rules/transcription-workflow.md`, `rules/note-production-modes.md`, `rules/deep-output-contract.md`, `rules/content-modes.md`, `rules/output-and-layout.md`, `rules/review-checklists.md`, `rules/faithful-cost-path.md`, `rules/incremental-notes.md`, `rules/repository-maintenance.md`.
+- 세부 계약: `rules/workflow.md`, `rules/orchestration.md`, `rules/transcription-workflow.md`, `rules/note-production-modes.md`, `rules/deep-output-contract.md`, `rules/content-modes.md`, `rules/output-and-layout.md`, `rules/review-checklists.md`, `rules/faithful-cost-path.md`, `rules/incremental-notes.md`, `rules/repository-maintenance.md`, `rules/course-ledger.md`.
 - DEEP 단일 실행: `rules/deep-single-agent.md`.

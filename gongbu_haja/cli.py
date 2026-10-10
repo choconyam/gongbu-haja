@@ -3,6 +3,8 @@
 하위 명령은 엔진 `scripts/`의 파일 하나에 그대로 대응한다. 이 모듈이 하는 일은
 둘뿐이다: 엔진 위치를 찾고, 사용자가 명시하지 않은 경로 인자에 과목 폴더
 기준 기본값(`.gongbu/`)을 넣는다. 스크립트 본체의 인자·동작은 바꾸지 않는다.
+`status`·`course`·`semester`는 `course_ledger.py` 하나가 받으므로 명령 이름을
+첫 인자로 넘긴다.
 """
 
 from __future__ import annotations
@@ -38,7 +40,14 @@ SCRIPT_COMMANDS: dict[str, str] = {
     "review-apply": "apply_transcript_corrections.py",
     "prepare-sources": "prepare_source_map.py",
     "notion": "push_notion.py",
+    "status": "course_ledger.py",
+    "course": "course_ledger.py",
+    "semester": "course_ledger.py",
 }
+# 스크립트 하나(course_ledger.py)가 받는 명령들: 명령 이름을 첫 인자로 넘긴다.
+LEDGER_COMMANDS = ("status", "course", "semester")
+# 과목 폴더를 알아야 하는 노션 하위 명령: --course-dir를 넣는다.
+NOTION_COURSE_COMMANDS = ("setup", "check", "push", "dashboard", "semester", "rekey")
 VALIDATE_TARGETS: dict[str, str] = {
     "setup": "validate_agent_setup.py",
     "note": "validate_note_output.py",
@@ -93,14 +102,40 @@ USAGE = f"""gongbu {__version__} — 과목 폴더에서 쓰는 gongbu-haja 명�
   record ... --playback-rate 1.75
                          재생 배속 기본 1.75 (사이트가 막으면 1). 배속은 녹음 sidecar·전사 manifest에 기록
 
+과목 현황 (네트워크 없이)
+  status [--json] [--all | --semester <ID>]
+                         강의별 교안·녹음·노트·노션 상태와 다음 할 일을 보여 준다(읽기 전용)
+  course init --name <과목명> --mode faithful|deep --materials handout|handout+recording
+                         과목 원장 {STATE_DIR_NAME}/course.json 을 만든다(과목마다 처음 한 번)
+  course import <plan.json> [--dry-run] [--force]
+                         강의·자료·노트를 한 번에 등록한다(처음 정리나 새 강의). 강의는 여기서만 새로 생긴다
+                         <원장 강의ID>는 영문·숫자·_.-(예: w01, ch05)로, 녹음·전사 폴더의 <강의ID>와 다르다
+  course note <원장 강의ID> --source <원고> --progress done|in_progress [--output <노트>] [--covers <범위>]
+                         노트를 만들거나 고친 뒤 원장에 등록한다
+  course material add <원장 강의ID> <파일> --kind handout|recording|transcript [--part <범위>] [--from <녹음>] [--force]
+                         최근 5분 안에 바뀐 파일은 거부한다. 방금 끝난 녹음·전사는 --force로 등록한다
+  course set|relink|show ...
+                         과목 기본값 바꾸기 · 옮겨진 파일 다시 연결 · 원장 보기
+  semester init <ID> --title <이름> --start <1주차 월요일> --weeks <주 수>
+  semester add-course|remove-course|use|show ...
+                         학기 목록(사용자 설정 폴더의 semesters.json). 쓰는 명령은 모두 --dry-run 가능
+
 노션 (선택 설치 notion: keyring)
   notion login           노션 API 토큰을 OS 비밀번호 보관소에 저장한다 (사용자가 자기 터미널에서 직접)
-  notion setup <상위 페이지 링크> --course <과목명> [--slides yes|no]
-                         과목 페이지를 만든다. 차시 노트는 그 아래 페이지로 올라간다
+  notion setup [<상위 페이지 링크>] --course <과목명> [--slides yes|no] [--new-page]
+                         과목 페이지를 만든다. 차시 노트는 그 아래 페이지로 올라간다.
+                         학기에 넣은 과목은 링크 없이 학기 페이지 아래에 만든다
   notion check <노트.md|원고.tex>  네트워크 없이 노션 블록으로 바꿔 검사한다(.tex는 심화 이해형)
-  notion push <노트.md|원고.tex> [--dry-run] [--handout "교안 01·02"] [--overwrite]
+  notion push <노트.md|원고.tex> [--dry-run] [--handout "교안 01·02"] [--overwrite] [--no-dashboard]
                          과목 페이지 아래에 노트 한 페이지를 올린다. 바뀐 노트는 같은 페이지에서 내용만 바꾼다.
-                         노션에서 고친 페이지는 멈추고 알린다(고친 내용을 원고에 반영한 뒤 --overwrite)
+                         노션에서 고친 페이지는 멈추고 알린다(고친 내용을 원고에 반영한 뒤 --overwrite).
+                         --no-dashboard: 여러 노트를 잇달아 올릴 때 학기 현황판 갱신을 끝에 한 번만 한다
+  notion semester create|move [--root <링크>] [--semester <ID>] [--dry-run]
+                         학기 페이지를 만들고(create) 과목 페이지를 그 아래로 옮긴다(move, 링크 그대로)
+  notion dashboard [--semester <ID>] [--preview]
+                         학기 페이지 맨 위 현황판을 다시 그린다(--preview는 네트워크 없이 글자로만)
+  notion rekey <예전 원고> <새 원고>
+                         원고 파일 이름이 바뀌었을 때 같은 노션 페이지를 이어 쓰게 기록을 옮긴다
 
 검수 도구
   prepare-sources ...    자료 충실형 무손실 원문 묶음·기계적 전사 검사 (모델 호출 없음)
@@ -132,7 +167,11 @@ def build_argv(command: str, rest: Sequence[str], course: Path) -> list[str]:
         if argv and argv[0] == "init" and not has_option(argv, "--root", "--state-root"):
             argv += ["--state-root", str(state_root(course))]
     elif command == "notion":
-        if argv and argv[0] in ("setup", "check", "push") and not has_option(argv, "--course-dir"):
+        if argv and argv[0] in NOTION_COURSE_COMMANDS and not has_option(argv, "--course-dir"):
+            argv += ["--course-dir", str(course)]
+    elif command in LEDGER_COMMANDS:
+        argv = [command, *argv]
+        if not has_option(argv, "--course-dir"):
             argv += ["--course-dir", str(course)]
     return argv
 

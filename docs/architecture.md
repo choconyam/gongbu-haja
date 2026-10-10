@@ -15,7 +15,7 @@
 
 ## 모드 선택과 자체 점검
 
-새 학습노트 요청에서 모드를 말하지 않으면 에이전트는 작업 전에 두 모드를 제시하고 선택을 받는다. 자료 특성에 맞는 모드를 추천할 수는 있지만 과목 계열만으로 결정하지 않는다. **모드는 모델 등급이 아니라 설명 범위의 선택**이다. 두 모드 모두 사용자가 현재 세션에서 선택한 모델·reasoning effort를 그대로 사용하며 별도 모델이나 검수 에이전트를 자동 호출하지 않는다.
+새 학습노트 요청에서 모드를 말하지 않으면 에이전트는 과목의 기본 모드를 쓰고 한 줄로 알린다. 기본 모드는 그 과목을 처음 쓸 때 한 번 묻고 과목 원장(`.gongbu/course.json`)에 저장한다. 자료 특성에 맞는 모드를 추천할 수는 있지만 과목 계열만으로 결정하지 않는다. **모드는 모델 등급이 아니라 설명 범위의 선택**이다. 두 모드 모두 사용자가 현재 세션에서 선택한 모델·reasoning effort를 그대로 사용하며 별도 모델이나 검수 에이전트를 자동 호출하지 않는다.
 
 자료 충실형은 정리 과정에서 원문을 확인하고 마지막에 미처리·불확실 항목만 짧게 자체 점검한다. 심화 이해형은 필요한 설명을 보강한 뒤 완성본 전체를 한 번 자체 점검한다. 어느 모드든 전사·추출·빌드·구조 검사는 가능한 범위에서 로컬 Python으로 처리하고 같은 원시 자료를 반복 입력하지 않는다. 기존 실행 상태 또는 사용자가 요청한 관리형 실행만 [관리형 실행 비용 정책](#관리형-실행-비용-정책)의 고정 역할·프로필을 사용한다.
 
@@ -240,10 +240,15 @@ gongbu-haja/
 │  ├─ execution_profiles.py   공통 실행 프로필·런타임별 모델표
 │  ├─ sync_runtime_agents.py  모델표에서 런타임별 선언 생성
 │  ├─ project_types.py         녹음·녹화 형식 단일 정의
+│  ├─ course_ledger.py         과목 원장·학기 목록·gongbu status(네트워크 없음)
+│  ├─ push_notion.py           노션 올리기(tex_to_notion.py가 TeX 변환)
+│  ├─ notion_dashboard.py      노션 학기 페이지·현황판
 │  ├─ validate_transcript_package.py
 │  ├─ validate_note_output.py
 │  ├─ validate_source_coverage.py  관리형 최종 검수의 source unit 처리 누락·중복 게이트
 │  ├─ validate_agent_setup.py
 │  └─ test_*.py                상태 전이·검증기·CLI 회귀 테스트
-└─ workspace/                  강의별 런타임 산출물(저장소를 직접 연 경우; 과목 폴더에서는 .gongbu/)
+└─ workspace/                  강의별 런타임 산출물(저장소를 직접 연 경우; 과목 폴더에서는 .gongbu/<강의ID>/)
 ```
+
+과목 폴더의 `.gongbu/` 바로 아래에는 과목 원장 `course.json`과 노션 연결 기록 `notion.json`이 함께 있다. 학기 목록 `semesters.json`은 과목 폴더 밖의 사용자 설정 폴더(Windows `%LOCALAPPDATA%\gongbu-haja`, `GONGBU_HAJA_CONFIG`로 변경 가능)에 있다.

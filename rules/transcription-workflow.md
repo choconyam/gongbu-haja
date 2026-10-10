@@ -54,6 +54,7 @@ python scripts/record_lecture.py --lecture-id <강의ID> --playback-rate 1   # �
 - 전사는 GPU 메모리를 독점하므로 동시에 하나만 실행한다. 녹음이 여러 개면 `../scripts/transcribe_batch.py`가 한 번에 하나씩 순서대로 처리한다.
 - 과목명과 날짜가 파일명·교안에서 명확하면 `lecture_id`를 자동 생성한다. 확정할 수 없을 때만 관리자가 사용자에게 묻고 `--lecture-id`로 전달한다.
 - 출력은 저장소에서 직접 실행하면 `workspace/<lecture_id>/transcript/`, 과목 폴더에서는 `<과목>/.gongbu/<lecture_id>/transcript/`에 만든다(`gongbu transcribe`가 자동 지정하고, 스크립트를 직접 쓰면 `--output-root <과목>/.gongbu`). 원본과 같은 위치에 TXT·SRT를 만들지 않는다. 녹음기가 만든 녹음은 옆의 `.recording.json`에 남은 강의 ID를 그대로 쓴다.
+- 과목 원장이 있으면 전사가 끝난 뒤 녹음과 노트 작성용 전사본을 그 강의 자료로 등록한다(`course-ledger.md`).
 - 요약이 아니라 원래 발언 순서를 유지한 전사를 만든다.
 - 재청취 위치는 원시 SRT와 segments JSON에 구간별로 보존한다. 학습노트 입력용 Markdown에는 타임스탬프를 반복하지 않는다.
 - 단일 강의자의 연속 발언이나 화자를 판별하지 않은 자동 전사에는 `[화자 불명]`을 반복하지 않는다. 발표·토론처럼 여러 화자의 구분이 내용 이해에 필요할 때만 `교수`, `학생`, `발표자 1`, `사회자` 같은 기능 표지를 Markdown에 남기며 신원은 추정하지 않는다.
