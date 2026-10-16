@@ -22,7 +22,10 @@ import hashlib
 import io
 import json
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -33,11 +36,13 @@ from pathlib import Path
 from typing import Any, Callable
 
 try:
+    from . import build_deep_pdf as deep
     from .build_study_note_pdf import HandoffMemoError, public_text
-    from .tex_to_notion import convert_tex
+    from .tex_to_notion import TexNote, convert_tex
 except ImportError:  # `python scripts/push_notion.py`로 직접 실행할 때
+    import build_deep_pdf as deep
     from build_study_note_pdf import HandoffMemoError, public_text
-    from tex_to_notion import convert_tex
+    from tex_to_notion import TexNote, convert_tex
 
 API_URL = "https://api.notion.com/v1"
 NOTION_VERSION = "2025-09-03"
@@ -561,42 +566,55 @@ class NotionClient:
 # ------------------------------------------------------------------ 교안 슬라이드 그림
 
 SLIDE_PREFIX = "slide:"
+FIGURE_PREFIX = "figure:"  # 노트가 TikZ·pgfplots로 그린 그림(tex_to_notion이 그림 번호로 자리를 만든다)
 
 
-def slide_numbers(items: list[dict[str, Any]]) -> list[int]:
+def placeholder_number(block: dict[str, Any], prefix: str) -> int | None:
+    body = block[block["type"]]
+    upload = str(body.get("file_upload", {}).get("id", "")) if block["type"] == "image" else ""
+    return int(upload[len(prefix):]) if upload.startswith(prefix) else None
+
+
+def placeholder_numbers(items: list[dict[str, Any]], prefix: str) -> list[int]:
     found: list[int] = []
     for block in items:
-        body = block[block["type"]]
-        if block["type"] == "image" and str(body.get("file_upload", {}).get("id", "")).startswith(SLIDE_PREFIX):
-            found.append(int(body["file_upload"]["id"][len(SLIDE_PREFIX):]))
-        found.extend(slide_numbers(body.get("children", [])))
+        number = placeholder_number(block, prefix)
+        if number is not None:
+            found.append(number)
+        found.extend(placeholder_numbers(block[block["type"]].get("children", []), prefix))
     return found
 
 
-def without_slides(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """슬라이드 업로드를 끈 과목은 그림 자리에 캡션 글자(원본 PDF p.N)만 남긴다."""
+def slide_numbers(items: list[dict[str, Any]]) -> list[int]:
+    return placeholder_numbers(items, SLIDE_PREFIX)
+
+
+def without_slides(items: list[dict[str, Any]], prefix: str = SLIDE_PREFIX) -> list[dict[str, Any]]:
+    """그림을 올리지 않을 때 그림 자리에 캡션 글자(원본 PDF p.N, 그림 N …)만 남긴다."""
     out = []
     for block in items:
         body = block[block["type"]]
-        if block["type"] == "image" and str(body.get("file_upload", {}).get("id", "")).startswith(SLIDE_PREFIX):
-            caption = "".join(item["text"]["content"] for item in body.get("caption", []))
-            out.append({"type": "paragraph", "paragraph": {"rich_text": [text_item(caption, italic=True, color="gray")]}})
+        if placeholder_number(block, prefix) is not None:
+            caption = body.get("caption", [])
+            if prefix == SLIDE_PREFIX:
+                caption = [text_item("".join(item["text"]["content"] for item in caption), italic=True, color="gray")]
+            out.append({"type": "paragraph", "paragraph": {"rich_text": caption}})
             continue
         if body.get("children"):
-            block = {**block, block["type"]: {**body, "children": without_slides(body["children"])}}
+            block = {**block, block["type"]: {**body, "children": without_slides(body["children"], prefix)}}
         out.append(block)
     return out
 
 
-def with_uploads(items: list[dict[str, Any]], uploads: dict[int, str]) -> list[dict[str, Any]]:
+def with_uploads(items: list[dict[str, Any]], uploads: dict[int, str], prefix: str = SLIDE_PREFIX) -> list[dict[str, Any]]:
     out = []
     for block in items:
         body = block[block["type"]]
-        if block["type"] == "image" and str(body.get("file_upload", {}).get("id", "")).startswith(SLIDE_PREFIX):
-            number = int(body["file_upload"]["id"][len(SLIDE_PREFIX):])
+        number = placeholder_number(block, prefix)
+        if number is not None:
             block = {**block, "image": {**body, "file_upload": {"id": uploads[number]}}}
         elif body.get("children"):
-            block = {**block, block["type"]: {**body, "children": with_uploads(body["children"], uploads)}}
+            block = {**block, block["type"]: {**body, "children": with_uploads(body["children"], uploads, prefix)}}
         out.append(block)
     return out
 
@@ -640,6 +658,97 @@ def upload_slides(client: Any, pdf: Path, numbers: list[int]) -> dict[int, str]:
     for number in dict.fromkeys(numbers):
         data, content_type = render_slide(pdf, number)
         filename = f"slide-p{number:03d}.{'png' if content_type == 'image/png' else 'jpg'}"
+        created = client.request("POST", "/file_uploads", {"filename": filename, "content_type": content_type})
+        client.send_file(created["id"], filename, data, content_type)
+        uploads[number] = created["id"]
+    return uploads
+
+
+# ------------------------------------------------------------------ 노트가 그린 그림
+
+FIGURE_WIDTH_PX = 1400  # 본문 폭을 이 가로 픽셀로 그린다. 그림이 PDF에서처럼 본문 폭 안에 같은 비율로 보인다
+FIGURE_PAD_PX = 28
+FIGURE_BOX_RE = re.compile(r"GONGBU-FIGURE-BOX ([\d.]+)pt ([\d.]+)pt")
+
+
+def figure_document(tex: TexNote, fonts: str | None) -> str:
+    """그림마다 한 쪽씩, 노트와 같은 서문(글꼴·배치·매크로)으로 그림만 조판하는 문서."""
+    if tex.preamble.strip():
+        preamble = tex.preamble
+    else:  # 관리형 빌드의 본문 조각: 빌더와 같은 글꼴 폴더와 공통 스타일
+        style = deep.STYLE.resolve().as_posix()
+        preamble = ("\\documentclass[a4paper,11pt]{article}\n"
+                    + (f"\\newcommand{{\\GongbuFontDir}}{{{fonts}}}\n" if fonts else "")
+                    + f'\\input{{"{style}"}}\n')
+    pages = []
+    for source in tex.figures:
+        # 노트의 notefigure와 같은 폭·가운데 맞춤·그림 스타일. 그림 하나가 한 쪽이다.
+        pages.append("\\setbox0=\\vbox{\\hsize=\\textwidth\\linewidth=\\hsize\\parindent=0pt\\centering"
+                     "\\gongbufigurestyle\n" + source + "\n\\par}\n\\box0\\clearpage\n")
+    return (preamble.rstrip() + "\n\\makeatletter\\let\\gongbufigurestyle\\gongbu@figurestyle\\makeatother\n"
+            "\\begin{document}\\pagestyle{empty}\n"
+            "\\typeout{GONGBU-FIGURE-BOX \\the\\dimexpr1in+\\hoffset+\\oddsidemargin\\relax\\space\\the\\textwidth}\n"
+            + "".join(pages) + "\\end{document}\n")
+
+
+def render_figures(note_path: Path, tex: TexNote) -> list[tuple[bytes, str]]:
+    """노트가 그린 그림을 XeLaTeX로 따로 조판해 그림 번호 순서의 PNG로 돌려준다.
+
+    PDF 빌드와 같은 조건(셸 실행 없음, MiKTeX 자동 설치 끔)으로 원고 폴더에서 조판하고, 본문 폭 그대로 잘라
+    위아래 빈 곳만 줄인다.
+    """
+    executable = shutil.which("xelatex")
+    if not executable:
+        raise NotionError("노트 그림을 만들 XeLaTeX가 없습니다.")
+    try:
+        import pypdfium2 as pdfium
+        from PIL import Image, ImageChops, ImageOps
+    except ImportError as exc:
+        raise NotionError("노트 그림을 올리려면 pypdfium2와 Pillow가 필요합니다. "
+                          "`python -m pip install pypdfium2 Pillow` 후 다시 실행하십시오.") from exc
+    version = subprocess.run([executable, "--version"], capture_output=True, timeout=15).stdout
+    installer = ["-disable-installer"] if b"miktex" in version.lower() else []
+    with tempfile.TemporaryDirectory(prefix="gongbu-figures-") as temporary:
+        work = Path(temporary)
+        (work / "figures.tex").write_text(figure_document(tex, deep.font_dir()), encoding="utf-8")
+        result = subprocess.run([executable, *installer, "-no-shell-escape", "-interaction=nonstopmode", "-halt-on-error",
+                                 f"-output-directory={work}", str(work / "figures.tex")],
+                                cwd=note_path.parent, capture_output=True, timeout=120)
+        log_file = work / "figures.log"
+        log = log_file.read_text(encoding="utf-8", errors="replace") if log_file.exists() else ""
+        box = FIGURE_BOX_RE.search(log)
+        if result.returncode or not box or not (work / "figures.pdf").is_file():
+            raise NotionError("노트 그림을 조판하지 못했습니다. 먼저 PDF 빌드가 되는지 확인하십시오.\n" + log[-2000:])
+        left, width = (float(value) for value in box.groups())
+        document = pdfium.PdfDocument(str(work / "figures.pdf"))
+        try:
+            if len(document) != len(tex.figures):
+                raise NotionError(f"노트 그림 {len(tex.figures)}장이 {len(document)}쪽으로 조판됐습니다. "
+                                  "한 쪽보다 큰 그림이 있는지 확인하십시오.")
+            images = []
+            scale = FIGURE_WIDTH_PX / width
+            for index in range(len(document)):
+                page = document[index]
+                image = page.render(scale=scale).to_pil().convert("RGB")
+                page.close()
+                strip = image.crop((round(left * scale), 0, round(left * scale) + FIGURE_WIDTH_PX, image.height))
+                ink = ImageChops.difference(strip, Image.new("RGB", strip.size, "white")).getbbox()
+                if ink is None:
+                    raise NotionError(f"그림 {index + 1}이 비어 있습니다.")
+                strip = strip.crop((0, ink[1], strip.width, ink[3]))
+                strip = ImageOps.expand(strip, border=(0, FIGURE_PAD_PX), fill="white")
+                buffer = io.BytesIO()
+                strip.save(buffer, "PNG", optimize=True)
+                images.append((buffer.getvalue(), "image/png"))
+        finally:
+            document.close()
+    return images
+
+
+def upload_figures(client: Any, note_path: Path, tex: TexNote) -> dict[int, str]:
+    uploads: dict[int, str] = {}
+    for number, (data, content_type) in enumerate(render_figures(note_path, tex), start=1):
+        filename = f"figure-{number:02d}.png"
         created = client.request("POST", "/file_uploads", {"filename": filename, "content_type": content_type})
         client.send_file(created["id"], filename, data, content_type)
         uploads[number] = created["id"]
@@ -775,6 +884,8 @@ class Plan:
     previous: dict[str, Any] | None = None
     slide_pdf: Path | None = None
     slides: list[int] = field(default_factory=list)
+    note_path: Path | None = None  # 노트가 그린 그림을 조판할 원고(그림이 없으면 None)
+    figures: TexNote | None = None
     local_changed: bool = False  # 노션에서 고친 흔적이 있을 때, 원고도 마지막으로 올린 뒤 바뀌었는지
     seen_time: str | None = None  # 수정 시각은 바뀌었지만 빈 문단만 생긴 페이지의 지금 수정 시각
 
@@ -864,10 +975,13 @@ def untouched(client: Any, plan: Plan, record: dict[str, Any]) -> bool:
     return digest(remote_outline(client, record["page_id"])) == expected
 
 
-def read_note(note_path: Path, course: str, slides_on: bool) -> tuple[Note, str, Path | None, list[int]]:
-    """원고를 노션 블록으로 옮긴다. `.tex`는 심화 이해형 원고, 그 밖은 자료 충실형 Markdown으로 본다."""
+def read_note(note_path: Path, course: str, slides_on: bool) -> tuple[Note, str, Path | None, list[int], TexNote | None]:
+    """원고를 노션 블록으로 옮긴다. `.tex`는 심화 이해형 원고, 그 밖은 자료 충실형 Markdown으로 본다.
+
+    마지막 값은 노트가 그린 그림을 올릴 때 조판할 원고 정보다(그림이 없거나 올릴 수 없으면 None).
+    """
     if note_path.suffix.lower() != ".tex":
-        return convert(note_path.read_text(encoding="utf-8"), course), "faithful", None, []
+        return convert(note_path.read_text(encoding="utf-8"), course), "faithful", None, [], None
     tex = convert_tex(note_path)
     note = Note(tex.title or note_path.stem, tex.summary, tex.blocks, list(tex.problems))
     numbers = sorted(set(tex.slides))
@@ -875,7 +989,12 @@ def read_note(note_path: Path, course: str, slides_on: bool) -> tuple[Note, str,
         note.blocks = without_slides(note.blocks)
     elif numbers and (tex.slide_pdf is None or not tex.slide_pdf.is_file()):
         note.problems.append(f"오류: 슬라이드 그림을 만들 교안 PDF를 찾지 못했습니다: {tex.slide_pdf}")
-    return note, "deep", tex.slide_pdf, numbers
+    figures: TexNote | None = tex if tex.figures else None
+    if figures and not shutil.which("xelatex"):
+        note.blocks = without_slides(note.blocks, FIGURE_PREFIX)
+        note.problems.append(f"주의: XeLaTeX가 없어 노트가 그린 그림 {len(tex.figures)}장은 캡션 글자만 올립니다.")
+        figures = None
+    return note, "deep", tex.slide_pdf, numbers, figures
 
 
 def plan_push(client: Any, course_dir: Path, note_path: Path, state: dict[str, Any], *, title: str | None = None,
@@ -884,7 +1003,7 @@ def plan_push(client: Any, course_dir: Path, note_path: Path, state: dict[str, A
         raise NotionError("예전 방식(과목 페이지 안의 표)으로 연결된 과목입니다. 과목 폴더에서 `gongbu notion setup <상위 페이지 링크>`를 "
                           "한 번 다시 실행하면 차시 페이지 방식으로 바뀝니다.")
     slides_on = bool(state.get("slides"))
-    note, default_mode, slide_pdf, numbers = read_note(note_path, state.get("course", ""), slides_on)
+    note, default_mode, slide_pdf, numbers, figures = read_note(note_path, state.get("course", ""), slides_on)
     if note.errors:
         raise NotionError("노션 변환 검사에서 오류가 나 올리지 않았습니다:\n" + "\n".join(note.errors))
     final_title = title or note.title or note_path.stem
@@ -892,9 +1011,12 @@ def plan_push(client: Any, course_dir: Path, note_path: Path, state: dict[str, A
     final_mode = mode or default_mode
     final_handout = handout or (f"교안 p.{numbers[0]}–{numbers[-1]}" if numbers else "")
     pdf_hash = file_sha256(slide_pdf) if slides_on and numbers and slide_pdf else None
+    # 그림 TeX가 바뀌면 캡션이 같아도 다시 올린다. 그림이 없는 노트의 비교값은 예전 그대로다.
+    content = [note.blocks, pdf_hash] + ([[figures.preamble, figures.figures]] if figures else [])
     plan = Plan(note_key(course_dir, note_path), note, final_title, final_summary, final_mode, final_handout,
-                digest([note.blocks, pdf_hash]), digest([final_title, final_summary, final_mode, final_handout]),
-                slide_pdf=slide_pdf if slides_on else None, slides=numbers if slides_on else [])
+                digest(content), digest([final_title, final_summary, final_mode, final_handout]),
+                slide_pdf=slide_pdf if slides_on else None, slides=numbers if slides_on else [],
+                note_path=note_path if figures else None, figures=figures)
     record = state.get("notes", {}).get(plan.key)
     if record is None:
         return plan
@@ -937,6 +1059,8 @@ def children(client: Any, block_id: str) -> list[dict[str, Any]]:
 def page_blocks(client: Any, plan: Plan) -> list[dict[str, Any]]:
     """머리 줄과 본문. 슬라이드 그림을 먼저 올려 두어 중간에 실패해도 반쯤 바뀐 페이지가 덜 남게 한다."""
     body = plan.note.blocks
+    if plan.figures and plan.note_path:  # 조판 실패가 가장 흔하므로 먼저 만든다
+        body = with_uploads(body, upload_figures(client, plan.note_path, plan.figures), FIGURE_PREFIX)
     if plan.slides and plan.slide_pdf:
         body = with_uploads(body, upload_slides(client, plan.slide_pdf, plan.slides))
     return [header_block(plan.mode, plan.handout, plan.summary)] + body
@@ -1035,9 +1159,10 @@ def describe(note: Note, title: str, summary: str) -> str:
     tables = sum(block["type"] == "table" for block in note.blocks)
     equations = sum(block["type"] == "equation" for block in note.blocks)
     images = len(slide_numbers(note.blocks))
-    requests = len(request_chunks(note.blocks)) + 2 + 2 * images
+    figures = len(placeholder_numbers(note.blocks, FIGURE_PREFIX))
+    requests = len(request_chunks(note.blocks)) + 2 + 2 * (images + figures)
     lines = [f"제목: {title}", f"내용: {summary or '(없음)'}",
-             f"블록: {len(note.blocks)}개(표 {tables}개, 독립 수식 {equations}개, 슬라이드 그림 {images}장, "
+             f"블록: {len(note.blocks)}개(표 {tables}개, 독립 수식 {equations}개, 슬라이드 그림 {images}장, 노트 그림 {figures}장, "
              f"전체 요소 {count_elements(note.blocks)}개)", f"예상 요청: 약 {requests}회"]
     lines += [f"- {problem}" for problem in dict.fromkeys(note.problems)] or ["문제: 없음"]
     return "\n".join(lines)
@@ -1129,7 +1254,7 @@ def main(argv: list[str] | None = None) -> int:
         course_dir = args.course_dir.expanduser().resolve()
         if args.command == "check":
             known = load_state(course_dir, required=False)
-            note, _, _, _ = read_note(args.note, known.get("course", ""), bool(known.get("slides")))
+            note, _, _, _, _ = read_note(args.note, known.get("course", ""), bool(known.get("slides")))
             print(describe(note, args.title or note.title or args.note.stem, note.summary if args.summary is None else args.summary))
             return 1 if note.errors else 0
         client = NotionClient(load_token())

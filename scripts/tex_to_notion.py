@@ -1,9 +1,10 @@
 """심화 이해형(DEEP) TeX 원고를 노션 블록으로 옮긴다.
 
-DEEP 원고는 deep_note_style.tex의 명령 몇 가지(\\sourceslide, keybox·warnbox·goodbox, \\gongbucover)와
+DEEP 원고는 deep_note_style.tex의 명령 몇 가지(\\sourceslide, keybox·warnbox·goodbox, notefigure, \\gongbucover)와
 일반 LaTeX(절, 수식 환경, 목록, 표, 각주)로 이루어진다. 이 모듈은 그 범위만 결정적으로 옮긴다:
 절 제목은 PDF와 같은 번호로, 수식은 PDF와 같은 식 번호로, 슬라이드는 그림 자리(나중에 올릴 쪽 번호)로,
-강조 상자는 색 상자로 바꾼다. 쪽 나눔 명령은 노션에 쪽이 없으므로 버린다.
+노트가 그린 그림은 PDF와 같은 번호의 그림 자리(나중에 따로 조판해 올릴 TeX)로, 강조 상자는 색 상자로 바꾼다.
+쪽 나눔 명령은 노션에 쪽이 없으므로 버린다.
 """
 
 from __future__ import annotations
@@ -37,6 +38,30 @@ class TexNote:
     slides: list[int] = field(default_factory=list)
     slide_pdf: Path | None = None
     problems: list[str] = field(default_factory=list)
+    figures: list[str] = field(default_factory=list)  # 노트가 그린 그림의 TeX(캡션·라벨 제외), 그림 번호 순서
+    preamble: str = ""  # 완전한 문서의 서문(그림을 따로 조판할 때 같은 글꼴·배치·매크로를 쓴다). 본문 조각이면 빈 값
+
+
+FIGURE_ENVIRONMENT = "notefigure"
+
+
+def figure_parts(body: str) -> tuple[str, str, str | None]:
+    """notefigure 환경의 본문을 (캡션, 그림 TeX, 라벨)로 나눈다."""
+    stripped = body.lstrip()
+    caption, end = braced(stripped, 0)
+    drawing = stripped[end:]
+    label = re.search(r"\\label\{([^}]*)\}", drawing)
+    drawing = re.sub(r"\\label\{[^}]*\}", "", drawing).strip()
+    return caption, drawing, label.group(1).strip() if label else None
+
+
+def figure_sources(body: str) -> list[str]:
+    """본문의 notefigure마다 그림 TeX을 순서대로 꺼낸다(쪽 나눔 명령을 버리기 전의 원고에서)."""
+    sources = []
+    for match in re.finditer(r"\\begin\{" + FIGURE_ENVIRONMENT + r"\}", body):
+        inner, _ = environment_body(body, FIGURE_ENVIRONMENT, match.end())
+        sources.append(figure_parts(inner)[1])
+    return sources
 
 
 def strip_comments(text: str) -> str:
@@ -380,7 +405,7 @@ def inline_items(tex: str, context: dict[str, Any], style: dict[str, bool] | Non
         elif command in ("eqref", "ref"):
             number = context["numbering"].labels.get(argument.strip())
             if number is None:
-                context["problems"].append(f"주의: 참조할 식 번호를 찾지 못했습니다: {argument}")
+                context["problems"].append(f"주의: 참조할 식·그림 번호를 찾지 못했습니다: {argument}")
             text = f"({number})" if command == "eqref" else str(number or "?")
             items.append({"type": "text", "text": {"content": text}})
         else:
@@ -540,6 +565,8 @@ def convert_body(tex: str, context: dict[str, Any]) -> list[dict[str, Any]]:
                 blocks.extend(math_blocks(name, body, context["numbering"], context["problems"]))
             elif name in BOXES:
                 blocks.append(box(name, match.group("opt"), body, context))
+            elif name == FIGURE_ENVIRONMENT:
+                blocks.append(figure_block(body, context))
             elif name in ("itemize", "enumerate"):
                 blocks.extend(list_blocks(name, body, context))
             elif name in ("tabular", "tabularx", "longtable", "table"):
@@ -564,6 +591,19 @@ def box(name: str, title: str | None, body: str, context: dict[str, Any]) -> dic
     if inner:
         callout["children"] = inner
     return {"type": "callout", "callout": callout}
+
+
+def figure_block(body: str, context: dict[str, Any]) -> dict[str, Any]:
+    """노트가 그린 그림을 그림 자리로. 캡션은 PDF와 같은 `그림 N` 번호로 시작한다."""
+    caption, _, _ = figure_parts(body)
+    context["figure"] += 1
+    number = context["figure"]
+    items: list[dict[str, Any]] = [{"type": "text", "text": {"content": f"그림 {number}"}, "annotations": {"bold": True}}]
+    rest = inline_items(caption, context)
+    if rest:
+        items += [{"type": "text", "text": {"content": "  "}}] + rest
+    return {"type": "image", "image": {"type": "file_upload", "file_upload": {"id": f"figure:{number}"},
+                                       "caption": merge(items)[:100]}}
 
 
 def list_blocks(name: str, body: str, context: dict[str, Any]) -> list[dict[str, Any]]:
@@ -614,9 +654,10 @@ def convert_tex(path: Path) -> TexNote:
     body = expand_macros(body, macros(preamble + "\n" + body))
     body = re.sub(r"\\(?:re)?newcommand\*?\s*\{?\\[A-Za-z]+\}?\s*(?:\[\d\])?\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", "", body)
     body = re.sub(r"\\gongbu(?:cover|header)\s*(?:\{[^{}]*\})+", "", body)
+    figures = figure_sources(body)
     body = DROP_COMMANDS.sub("", body)
     context: dict[str, Any] = {"numbering": Numbering(), "footnotes": [], "problems": [], "slides": [],
-                               "section": 0, "subsection": 0}
+                               "section": 0, "subsection": 0, "figure": 0}
     prescan_labels(body, context["numbering"])
     blocks = convert_body(body, context)
     if context["footnotes"]:
@@ -626,7 +667,7 @@ def convert_tex(path: Path) -> TexNote:
             blocks.append({"type": "numbered_list_item",
                            "numbered_list_item": {"rich_text": merge(inline_items(note, context))[:100]}})
     return TexNote(text_from_tex(course).strip(), text_from_tex(title).strip(), text_from_tex(summary).strip(),
-                   blocks, context["slides"], slide_pdf, context["problems"])
+                   blocks, context["slides"], slide_pdf, context["problems"], figures, preamble)
 
 
 def prescan_labels(body: str, numbering: Numbering) -> None:
@@ -640,3 +681,7 @@ def prescan_labels(body: str, numbering: Numbering) -> None:
         for chunk in ([inner] if name.rstrip("*") in ("equation", "multline") else split_rows(inner)):
             scout.take(chunk)
     numbering.labels.update(scout.labels)
+    for number, match in enumerate(re.finditer(r"\\begin\{" + FIGURE_ENVIRONMENT + r"\}", body), start=1):
+        _, _, label = figure_parts(environment_body(body, FIGURE_ENVIRONMENT, match.end())[0])
+        if label:
+            numbering.labels[label] = str(number)

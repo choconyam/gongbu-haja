@@ -142,6 +142,67 @@ class ConvertTexTests(unittest.TestCase):
         self.assertEqual("heading_1", note.blocks[0]["type"])
 
 
+FIGURE_DOCUMENT = r"""\documentclass[a4paper,11pt]{article}
+\input{"C:/engine/scripts/deep_note_style.tex"}
+\begin{document}
+\gongbucover{회로이론}{5주차}{RC 회로}
+그림~\ref{fig:rc}을 먼저 본다.
+\begin{notefigure}{충전 전압 $v_C(t)$는 $V_0$에 다가간다.}
+\begin{tikzpicture}
+\begin{axis}[xmin=0,xmax=5]
+  \addplot+[domain=0:5] {1-exp(-x)};
+\end{axis}
+\end{tikzpicture}\hspace{6mm}%
+\begin{tikzpicture}\draw[vector] (0,0) -- (1,1);\end{tikzpicture}
+\label{fig:rc}
+\end{notefigure}
+그림~\ref{fig:rc}에서 곡선이 오르고, 그림~\ref{fig:loop}에서 신호가 돈다.
+\begin{notefigure}{되먹임 블록선도}
+\begin{tikzpicture}\node[block] {$G(s)$};\end{tikzpicture}
+\label{fig:loop}
+\end{notefigure}
+\end{document}
+"""
+
+
+class FigureTests(unittest.TestCase):
+    """노트가 그린 그림은 PDF와 같은 번호의 그림 자리가 되고, TikZ 코드는 글자로 새지 않는다."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        path = Path(self.temp.name) / "figures.tex"
+        path.write_text(FIGURE_DOCUMENT, encoding="utf-8")
+        self.note = tn.convert_tex(path)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_figures_become_numbered_image_placeholders(self) -> None:
+        self.assertEqual([], self.note.problems)
+        images = [block["image"] for block in self.note.blocks if block["type"] == "image"]
+        self.assertEqual(["figure:1", "figure:2"], [image["file_upload"]["id"] for image in images])
+        caption = images[0]["caption"]
+        self.assertEqual({"type": "text", "text": {"content": "그림 1"}, "annotations": {"bold": True}}, caption[0])
+        self.assertIn({"type": "equation", "equation": {"expression": "v_C(t)"}}, caption)
+        self.assertEqual("그림 2  되먹임 블록선도", "".join(item["text"]["content"] for item in images[1]["caption"]))
+
+    def test_references_use_figure_numbers_even_before_the_figure(self) -> None:
+        paragraphs = ["".join(item.get("text", {}).get("content", "") for item in block["paragraph"]["rich_text"])
+                      for block in self.note.blocks if block["type"] == "paragraph"]
+        self.assertEqual(["그림 1을 먼저 본다.", "그림 1에서 곡선이 오르고, 그림 2에서 신호가 돈다."], paragraphs)
+
+    def test_drawing_source_is_kept_for_rendering_but_not_as_text(self) -> None:
+        self.assertEqual(2, len(self.note.figures))
+        self.assertIn("\\addplot+[domain=0:5]", self.note.figures[0])
+        self.assertIn("\\hspace{6mm}", self.note.figures[0])        # 나란히 놓은 두 그림의 간격도 그대로
+        self.assertNotIn("\\label", self.note.figures[0])
+        self.assertNotIn("충전 전압", self.note.figures[0])            # 캡션은 노션 캡션으로만 간다
+        self.assertIn('\\input{"C:/engine/scripts/deep_note_style.tex"}', self.note.preamble)
+        dumped = json.dumps(self.note.blocks, ensure_ascii=False)
+        for leftover in ("tikzpicture", "addplot", "vector", "notefigure"):
+            self.assertNotIn(leftover, dumped)
+
+
 class KatexArrayTests(unittest.TestCase):
     """노션 수식 엔진(KaTeX)의 array는 열 지정으로 l·c·r·|·:만 받는다."""
 

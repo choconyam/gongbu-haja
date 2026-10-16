@@ -506,6 +506,108 @@ class DeepNoteTests(unittest.TestCase):
             pn.render_slide(pdf, 2)
 
 
+FIGURE_TEX = r"""\documentclass{article}
+\begin{document}
+\gongbucover{회로이론}{5주차 RC 회로}{충전과 시정수}
+그림~\ref{fig:rc}처럼 전압이 오른다.
+\begin{notefigure}{충전 전압이 $V_0$에 다가간다.}
+\begin{tikzpicture}\draw[curve] (0,0) -- (1,1);\end{tikzpicture}
+\label{fig:rc}
+\end{notefigure}
+\begin{notefigure}{전류가 줄어든다.}
+\begin{tikzpicture}\draw[curve=FigAlt] (0,1) -- (1,0);\end{tikzpicture}
+\end{notefigure}
+\end{document}
+"""
+
+
+class DeepFigureTests(unittest.TestCase):
+    """노트가 그린 그림은 따로 조판해 올리고, XeLaTeX가 없으면 캡션 글자만 남긴다."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.course = Path(self.temp.name)
+        self.note = self.course / "05 학습노트.tex"
+        self.note.write_text(FIGURE_TEX, encoding="utf-8")
+        self.client = FakeClient()
+        pn.setup(self.client, self.course, PARENT, "회로이론", True)
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def appended_blocks(self) -> list[dict]:
+        return [block for method, path, body in self.client.calls if method == "PATCH" and path.endswith("/children")
+                for block in body["children"]]
+
+    def test_figures_are_rendered_once_and_attached(self) -> None:
+        state = pn.load_state(self.course)
+        with patch.object(pn.shutil, "which", return_value="xelatex"):
+            plan = pn.plan_push(self.client, self.course, self.note, state)
+        self.assertIn("노트 그림 2장", pn.describe(plan.note, plan.title, plan.summary))
+        with patch.object(pn, "render_figures", return_value=[(b"\x89PNG a", "image/png"), (b"\x89PNG b", "image/png")]) as render:
+            pn.push(self.client, self.course, plan, state, "2026-10-15")
+        render.assert_called_once()
+        self.assertEqual(self.note, render.call_args.args[0])
+        uploads = [body for method, path, body in self.client.calls if method == "POST" and path == "/file_uploads"]
+        self.assertEqual(["figure-01.png", "figure-02.png"], [body["filename"] for body in uploads])
+        images = [block["image"] for block in self.appended_blocks() if block["type"] == "image"]
+        self.assertEqual(2, len(images))
+        self.assertTrue(all(image["file_upload"]["id"].startswith("upload-") for image in images))
+        self.assertEqual("그림 2  전류가 줄어든다.", texts_of(images[1]["caption"]))
+        self.assertIn("그림 1처럼 전압이 오른다.", json.dumps(self.appended_blocks(), ensure_ascii=False))
+
+    def test_without_xelatex_only_captions_remain(self) -> None:
+        state = pn.load_state(self.course)
+        with patch.object(pn.shutil, "which", return_value=None):
+            plan = pn.plan_push(self.client, self.course, self.note, state)
+        self.assertTrue(any(problem.startswith("주의: XeLaTeX가 없어") for problem in plan.note.problems))
+        self.assertIsNone(plan.figures)
+        self.assertFalse(any(block["type"] == "image" for block in plan.note.blocks))
+        captions = [texts_of(block["paragraph"]["rich_text"]) for block in plan.note.blocks if block["type"] == "paragraph"]
+        self.assertIn("그림 1  충전 전압이 V_0에 다가간다.", captions)
+
+    def test_changed_drawing_is_uploaded_again(self) -> None:
+        state = pn.load_state(self.course)
+        with patch.object(pn.shutil, "which", return_value="xelatex"):
+            before = pn.plan_push(self.client, self.course, self.note, state).content_hash
+            self.note.write_text(FIGURE_TEX.replace("(1,1)", "(1,2)"), encoding="utf-8")
+            after = pn.plan_push(self.client, self.course, self.note, state).content_hash
+        self.assertNotEqual(before, after)
+        # 그림이 없는 노트의 비교값은 예전 공식 그대로라 이미 올린 노트를 다시 올리지 않는다.
+        plain = self.course / "plain.tex"
+        plain.write_text(DEEP_TEX.replace("\\sourceslide{2}\n", "").replace("\\sourceslide{5}\n", ""), encoding="utf-8")
+        plan = pn.plan_push(self.client, self.course, plain, state)
+        self.assertEqual(pn.digest([plan.note.blocks, None]), plan.content_hash)
+
+    @unittest.skipUnless(pn.shutil.which("xelatex"), "XeLaTeX와 한글 글꼴이 필요하다")
+    def test_render_figures_crops_to_text_width(self) -> None:
+        try:
+            from PIL import Image
+            import pypdfium2  # noqa: F401
+        except ImportError:
+            self.skipTest("pypdfium2·Pillow가 필요하다")
+        style = (Path(pn.__file__).parent / "deep_note_style.tex").resolve().as_posix()
+        self.note.write_text(FIGURE_TEX.replace("\\documentclass{article}",
+                                                "\\documentclass[a4paper,11pt]{article}\n\\input{\"" + style + "\"}"),
+                             encoding="utf-8")
+        images = pn.render_figures(self.note, pn.convert_tex(self.note))
+        self.assertEqual(2, len(images))
+        for data, content_type in images:
+            image = Image.open(io.BytesIO(data))
+            self.assertEqual(("image/png", pn.FIGURE_WIDTH_PX), (content_type, image.width))
+            self.assertLess(image.height, image.width)                     # 위아래 빈 곳은 잘라 낸다
+            self.assertEqual((255, 255, 255), image.convert("RGB").getpixel((0, 0)))
+        broken = pn.convert_tex(self.note)
+        broken.figures = ["\\begin{tikzpicture}\\draw[nonexistent style] (0,0)--(1,1);\\end{tikzpicture}"]
+        with self.assertRaises(pn.NotionError):
+            pn.render_figures(self.note, broken)
+
+
+def texts_of(items: list[dict]) -> str:
+    return "".join(item.get("text", {}).get("content", "") or item.get("equation", {}).get("expression", "")
+                   for item in items)
+
+
 class TokenTests(unittest.TestCase):
     def test_login_refuses_without_a_real_terminal(self) -> None:
         with patch("sys.stdin", io.StringIO("ignored")), self.assertRaises(pn.NotionError) as raised:

@@ -63,6 +63,7 @@ Use these as evidence-based gates, not as a demand that every note contain every
 - Non-obvious equalities or transformations name the rule used.
 - Signs, dimensions, limiting cases, and numerical scale are plausible.
 - Graph axes, curves, regions, and diagram flows are explained.
+- Figures the note draws itself are plotted from the actual equations and parameters; marked points and tick values match the text, and symbols, sign conventions, and directions match the derivation. Qualitative sketches carry no exact tick values, and a reconstructed board drawing is tracked internally rather than presented as the instructor's exact figure.
 - Code explanations match actual functions, shapes, configuration, and observed outputs.
 - Source `TODO` markers are included only when they are genuine learning or assignment targets; irrelevant template residue is excluded, and intentional tasks are labeled as such rather than left as unexplained note placeholders.
 
@@ -126,6 +127,7 @@ Suspect an explanation is too thin when it only:
 - copies an equation and lists symbols;
 - says a curve rises or falls without explaining why or what it changes;
 - names diagram blocks without following the flow;
+- explains a shape, direction, region, or signal flow only in words when the handout has no usable picture and a small drawn figure would remove the obstacle;
 - reduces an instructor explanation to “important” or “on the exam”;
 - adds unsupported background as a keyword list.
 
@@ -144,6 +146,7 @@ Suspect the note is padded when it:
 - repeats the same warning or claim in several places;
 - re-derives a calculation already shown earlier in the same way;
 - adds surrounding theory, alternative derivations, extra examples, or anticipated questions that the next step does not need;
+- adds a figure that decorates, redraws a slide that is already readable, or shows nothing the explanation uses;
 - spends body text on workflow notes, such as transcript-error history, “kept as in the lecture,” or traces of earlier corrections.
 
 Repair thinness by answering the missing learner question: what, why, how to read it, when it applies, how it connects, or how to recognize it on an exam, usually in one to three sentences or one intermediate equation. Do not repair it by repeating the same claim in more words. Repair padding by merging or deleting, and use the space for the missing explanation.

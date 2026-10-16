@@ -1,4 +1,4 @@
-% gongbu-haja DEEP 노트 디자인 — 표지·머리말·원본 슬라이드·강조 상자·간격의 단일 원본.
+% gongbu-haja DEEP 노트 디자인 — 표지·머리말·원본 슬라이드·강조 상자·노트가 그리는 그림·간격·배치의 단일 원본.
 %
 % 쓰는 법(완전한 TeX 문서):
 %   \documentclass[a4paper,11pt]{article}
@@ -12,15 +12,29 @@
 %
 % 바꿀 수 있는 값(\input 앞에 정의):
 %   \newcommand{\GongbuFontDir}{<폴더>/}   NotoSerifKR-VF.ttf·NotoSansKR-VF.ttf가 있는 폴더(끝에 / 필요)
-%   \newcommand{\GongbuSlideScale}{0.74}   원본 슬라이드에 곱하는 전체 배율
+%   \newcommand{\GongbuSlideScale}{0.74}   원본 슬라이드에 곱하는 전체 배율(compact 기본 0.68)
+%   \newcommand{\GongbuLayout}{compact}    인쇄용 조밀 배치. 생략하면 standard(아래 기준값)
+% compact는 여백 13~15mm·본문 10pt·줄간격 1.15로 한 쪽에 글을 약 1.5배 담는다(슬라이드가 대부분인 노트는
+% 쪽수가 거의 같다). 글꼴·색·상자·캡션 모양은 standard와 같고 크기와 간격만 줄인다. 한 과목은 한 배치로 통일한다.
 % 관리형 빌드(build_deep_pdf.py)는 GONGBU_FONT_DIR, Windows 글꼴 폴더, 사용자 글꼴 폴더 순으로
 % 가변 글꼴을 찾아 \GongbuFontDir를 정한다. 대체 글꼴을 쓰면 로그에 GONGBU-FONT-FALLBACK을 남긴다.
 %
 % 문서마다 서문을 새로 쓰거나 이 값을 옮겨 적지 않는다. 디자인 변경은 이 파일에서만 한다.
 \makeatletter
 
-\usepackage[a4paper,top=19mm,bottom=17mm,left=19mm,right=19mm,
-  headheight=14pt,headsep=6mm,footskip=9mm]{geometry}
+\RequirePackage{etoolbox}
+\providecommand{\GongbuLayout}{standard}
+\newif\ifgongbu@compact
+\ifdefstring{\GongbuLayout}{compact}{\gongbu@compacttrue}{%
+  \ifdefstring{\GongbuLayout}{standard}{}{\PackageError{gongbu-deep}{알 수 없는 배치입니다: \GongbuLayout}%
+    {\string\GongbuLayout 는 standard 또는 compact로 정하십시오.}}}
+\ifgongbu@compact
+  \usepackage[a4paper,top=15mm,bottom=14mm,left=13mm,right=13mm,
+    headheight=14pt,headsep=4.5mm,footskip=7mm]{geometry}
+\else
+  \usepackage[a4paper,top=19mm,bottom=17mm,left=19mm,right=19mm,
+    headheight=14pt,headsep=6mm,footskip=9mm]{geometry}
+\fi
 \usepackage[no-math]{fontspec}  % 수식 안 글자(\mathrm 포함)는 Computer Modern 그대로
 \usepackage{kotex}
 \usepackage{amsmath,amssymb,graphicx}
@@ -83,24 +97,44 @@
 \definecolor{GoodLight}{HTML}{EDF8F3}
 
 % ------------------------------------------------------------------ 문단·수식 간격
-\setlength{\parindent}{1.2em}
-\setlength{\parskip}{0.18em plus 0.12em}
-\linespread{1.20}
+% compact는 본문을 10pt로 바꾼다(문서 클래스는 두 배치 모두 11pt로 둔다).
+\ifgongbu@compact
+  \renewcommand\normalsize{\@setfontsize\normalsize\@xpt\@xiipt}
+  \renewcommand\small{\@setfontsize\small\@ixpt{11}}
+  \renewcommand\footnotesize{\@setfontsize\footnotesize\@viiipt{9.5}}
+  \AtBeginDocument{\normalsize}
+  \setlength{\parindent}{1.1em}
+  \setlength{\parskip}{0.12em plus 0.1em}
+  \linespread{1.15}
+  \newcommand{\gongbu@displayskip}{4pt plus 2pt minus 1.5pt}
+\else
+  \setlength{\parindent}{1.2em}
+  \setlength{\parskip}{0.18em plus 0.12em}
+  \linespread{1.20}
+  \newcommand{\gongbu@displayskip}{6pt plus 2pt minus 2pt}
+\fi
 \raggedbottom
 \emergencystretch=2em
 \AtBeginDocument{%
-  \setlength{\abovedisplayskip}{6pt plus 2pt minus 2pt}%
-  \setlength{\belowdisplayskip}{6pt plus 2pt minus 2pt}%
+  \setlength{\abovedisplayskip}{\gongbu@displayskip}%
+  \setlength{\belowdisplayskip}{\gongbu@displayskip}%
   \setlength{\abovedisplayshortskip}{2pt plus 2pt}%
   \setlength{\belowdisplayshortskip}{4pt plus 2pt minus 1pt}%
   \color{Ink}}
 
 % ------------------------------------------------------------------ 제목
 % 제목 뒤에는 보통 원본 슬라이드가 온다. 제목만 쪽 끝에 홀로 남지 않도록 먼저 자리를 확인한다.
-\titleformat{\section}{\sffamily\bfseries\fontsize{16}{20}\selectfont\color{Accent}}{\thesection.}{0.5em}{}
-\titleformat{\subsection}{\sffamily\bfseries\fontsize{12}{15}\selectfont\color{Accent}}{\thesubsection}{0.5em}{}
-\titlespacing*{\section}{0pt}{11pt}{3pt}
-\titlespacing*{\subsection}{0pt}{8pt}{2pt}
+\ifgongbu@compact
+  \titleformat{\section}{\sffamily\bfseries\fontsize{14}{17}\selectfont\color{Accent}}{\thesection.}{0.5em}{}
+  \titleformat{\subsection}{\sffamily\bfseries\fontsize{11}{13.5}\selectfont\color{Accent}}{\thesubsection}{0.5em}{}
+  \titlespacing*{\section}{0pt}{8pt}{2pt}
+  \titlespacing*{\subsection}{0pt}{6pt}{1.5pt}
+\else
+  \titleformat{\section}{\sffamily\bfseries\fontsize{16}{20}\selectfont\color{Accent}}{\thesection.}{0.5em}{}
+  \titleformat{\subsection}{\sffamily\bfseries\fontsize{12}{15}\selectfont\color{Accent}}{\thesubsection}{0.5em}{}
+  \titlespacing*{\section}{0pt}{11pt}{3pt}
+  \titlespacing*{\subsection}{0pt}{8pt}{2pt}
+\fi
 \pretocmd{\section}{\Needspace*{0.34\textheight}}{}{}
 \pretocmd{\subsection}{\Needspace*{0.30\textheight}}{}{}
 
@@ -127,7 +161,11 @@
 % 폭 0.84\linewidth·높이 0.34\textheight 상자 전체에 배율을 곱한다.
 % 얇은 테두리로 원본과 노트를 구분하고, 캡션은 슬라이드 오른쪽 끝에 맞춘다. 슬라이드만 쪽 끝에
 % 남고 설명이 다음 쪽으로 밀리지 않도록 설명 두 줄 자리를 함께 확보한다.
-\providecommand{\GongbuSlideScale}{0.74}
+\ifgongbu@compact
+  \providecommand{\GongbuSlideScale}{0.68}\newcommand{\gongbu@slideskip}{5pt}
+\else
+  \providecommand{\GongbuSlideScale}{0.74}\newcommand{\gongbu@slideskip}{7pt}
+\fi
 \newsavebox{\gongbu@slidebox}
 \newlength{\gongbu@slidew}
 \newlength{\gongbu@slideh}
@@ -147,7 +185,7 @@
   \fi}
 \newcommand{\gongbu@placeslide}[4]{% #1 크기, #2 그림 옵션, #3 파일, #4 캡션
   \gongbu@slidesize{#1}%
-  \par\addvspace{7pt}%
+  \par\addvspace{\gongbu@slideskip}%
   \sbox{\gongbu@slidebox}{\setlength{\fboxsep}{0pt}\setlength{\fboxrule}{0.5pt}%
     \fcolorbox{Hairline}{white}{\includegraphics[#2width=\gongbu@slidew,height=\gongbu@slideh,keepaspectratio]{#3}}}%
   \Needspace*{\dimexpr\ht\gongbu@slidebox+\dp\gongbu@slidebox+2\baselineskip\relax}%
@@ -172,16 +210,116 @@
 
 % ------------------------------------------------------------------ 강조 상자
 % 왼쪽 색 막대와 옅은 바탕, 색 제목. 짧은 상자는 쪽 끝에서 쪼개지지 않게 다섯 줄 자리가 없으면 넘긴다.
+\ifgongbu@compact
+  \newcommand{\gongbu@boxpad}{4pt}\newcommand{\gongbu@boxskip}{6pt}
+\else
+  \newcommand{\gongbu@boxpad}{5pt}\newcommand{\gongbu@boxskip}{8pt}
+\fi
 \tcbset{gongbu note/.style 2 args={enhanced,breakable,sharp corners,frame hidden,
   colback=#2,borderline west={2.4pt}{0pt}{#1},
-  left=10pt,right=9pt,top=5pt,bottom=5pt,boxsep=0pt,
+  left=10pt,right=9pt,top=\gongbu@boxpad,bottom=\gongbu@boxpad,boxsep=0pt,
   coltitle=#1,fonttitle=\sffamily\bfseries\fontsize{10}{12.5}\selectfont,
   attach title to upper={\par\vspace{1.5pt}},
-  after skip=8pt,
-  before={\par\Needspace*{5\baselineskip}\addvspace{\glueexpr 8pt-\parskip}\nointerlineskip}}}
+  after skip=\gongbu@boxskip,
+  before={\par\Needspace*{5\baselineskip}\addvspace{\glueexpr\gongbu@boxskip-\parskip}\nointerlineskip}}}
 \newtcolorbox{keybox}[1][핵심]{gongbu note={Accent}{AccentLight},title=#1}
 \newtcolorbox{warnbox}[1][주의]{gongbu note={Warn}{WarnLight},title=#1}
 \newtcolorbox{goodbox}[1][기억할 점]{gongbu note={Good}{GoodLight},title=#1}
+
+% ------------------------------------------------------------------ 노트가 그리는 그림
+% 교안에 없거나 너무 작은 그래프·도식을 노트가 직접 그릴 때 쓴다. TikZ·pgfplots로 TeX 안에서 그리므로
+% 본문과 같은 글꼴·색을 쓰고, 확대해도 깨지지 않으며, 외부 그림 파일이나 셸 실행이 필요 없다.
+%   \begin{notefigure}{캡션}
+%     \begin{tikzpicture} … \end{tikzpicture}     그래프는 tikzpicture 안에 axis 환경(pgfplots)
+%     \label{fig:이름}                             본문에서는 그림~\ref{fig:이름}
+%   \end{notefigure}
+% 원본 슬라이드와 구분되게 테두리 없이 가운데 두고, 아래에 "그림 N  캡션"을 단다. 그림과 캡션은 한 덩어리로
+% 움직이고 설명 두 줄 자리를 함께 확보한다. 본문 폭을 넘는 그림은 Overfull로 빌드가 멈춘다.
+% 모양은 교과서의 2도 인쇄를 따른다. 물체·축·보조 화살표는 검정 선으로 그리고, 그 그림에서 설명하려는
+% 양 하나만 남색(FigMain)으로 칠한다. 둘째로 강조할 양이 꼭 필요할 때만 갈색(FigAlt)을 쓴다(두 색은 흰 바탕에서
+% 색각 이상 구분 기준을 통과한다). 면은 칠하지 않고, 범례 대신 곡선 끝에 이름을 단다. 그래프 곡선은
+% 순서대로 남색 실선 → 검정 파선 → 갈색 일점쇄선이라 흑백 인쇄에서도 구분된다. 예시는 deep_figure_gallery.tex.
+\usetikzlibrary{arrows.meta,calc,positioning,angles,quotes,decorations.pathreplacing,intersections,patterns}
+\definecolor{FigMain}{HTML}{1F5FA0}
+\definecolor{FigAlt}{HTML}{B45309}
+\colorlet{FigInk}{Ink}
+\newcommand{\gongbu@figfont}{\normalfont\fontsize{9}{11}\selectfont}
+% 그래프 기본 크기는 두 배치에서 실제 크기가 거의 같다(약 80mm × 43mm).
+\ifgongbu@compact
+  \newcommand{\gongbu@figw}{0.43}\newcommand{\gongbu@figh}{0.232}
+\else
+  \newcommand{\gongbu@figw}{0.46}\newcommand{\gongbu@figh}{0.25}
+\fi
+\tikzset{
+  gongbu figure/.style={font=\gongbu@figfont,line cap=round,line join=round,color=FigInk,
+    >={Latex[length=1.9mm,width=1.3mm]},every node/.append style={text=Ink}},  % 글자는 곡선 색을 따르지 않는다
+  axis arrow/.style={->,draw=FigInk,line width=0.45pt},          % 직접 그리는 좌표축
+  curve/.style={line width=0.9pt,draw=#1},curve/.default=FigMain,  % 곡선·궤적
+  vector/.style={->,line width=0.8pt,draw=#1},vector/.default=FigInk,  % 힘·속도·위상자(설명의 주인공은 FigMain)
+  guide/.style={dash pattern=on 1.6pt off 1.6pt,line width=0.4pt,draw=Muted},  % 투영선·점근선·보조선
+  dimension/.style={{Latex[length=1.5mm,width=1mm]}-{Latex[length=1.5mm,width=1mm]},line width=0.4pt,
+    draw=FigInk},                                                  % 길이·간격 표시
+  region/.style={fill=#1,fill opacity=0.12,draw=none},region/.default=FigMain,  % 넓이·영역
+  body/.style={draw=FigInk,line width=0.5pt,fill=white},          % 물체·도형의 윤곽
+  dot/.style={circle,fill=#1,draw=none,inner sep=0pt,minimum size=3.4pt},dot/.default=FigInk,
+  open dot/.style={circle,fill=white,draw=#1,line width=0.6pt,inner sep=0pt,minimum size=3.8pt},
+  open dot/.default=FigInk,                                        % 포함하지 않는 끝점
+  block/.style={body,minimum width=14mm,minimum height=7.5mm,align=center,inner sep=3pt},  % 블록선도·흐름도
+  sum/.style={body,circle,minimum size=5mm,inner sep=0pt},
+  signal/.style={->,draw=FigInk,line width=0.5pt},                 % 블록 사이 신호·흐름
+}
+% 그래프(axis)는 pgfplots가 있을 때만 쓴다. 그림 없는 노트는 pgfplots가 없어도 빌드된다.
+\newif\ifgongbu@pgfplots
+\IfFileExists{pgfplots.sty}{\gongbu@pgfplotstrue}{}
+\ifgongbu@pgfplots
+  \usepackage{pgfplots}%
+  \@ifpackagelater{pgfplots}{2021/05/15}{\pgfplotsset{compat=1.18}}{\pgfplotsset{compat=newest}}%
+  \usepgfplotslibrary{fillbetween}%
+  \pgfplotsset{gongbu axis/.style={
+    scale only axis,width=\gongbu@figw\linewidth,height=\gongbu@figh\linewidth,
+    axis lines=middle,axis line style={draw=FigInk,line width=0.45pt,-{Latex[length=1.9mm,width=1.3mm]}},
+    enlarge x limits={upper,value=0.05},enlarge y limits={upper,value=0.07},
+    tick style={draw=FigInk,line width=0.4pt},major tick length=2.5pt,
+    tick label style={font=\fontsize{9}{11}\selectfont,color=Ink},
+    label style={font=\gongbu@figfont,color=Ink},
+    % 축 이름은 화살표 끝 바깥에 둔다(그래프 안의 곡선 이름과 겹치지 않게).
+    every axis x label/.style={at={(current axis.right of origin)},anchor=west,font=\gongbu@figfont,color=Ink},
+    every axis y label/.style={at={(current axis.above origin)},anchor=south,font=\gongbu@figfont,color=Ink},
+    grid style={draw=Hairline,line width=0.3pt},
+    legend style={draw=none,fill=white,fill opacity=0.85,text opacity=1,font=\gongbu@figfont,
+      legend cell align=left},
+    every axis plot/.append style={line width=0.9pt},
+    cycle list={{FigMain},{FigInk,densely dashed},{FigAlt,dashdotted}},
+    samples=121,clip mode=individual,
+  },
+  % axis 안의 \addplot에서는 보조선·영역이 곡선 색 순서를 차지하지 않고 범례에도 들어가지 않는다.
+  guide/.style={/tikz/guide,forget plot},
+  region/.style={/tikz/region=#1,forget plot},region/.default=FigMain}%
+\else
+  \newenvironment{axis}[1][]{\PackageError{gongbu-deep}{pgfplots가 없어 그래프(axis)를 그릴 수 없습니다}%
+    {TeX 배포판에 pgfplots 패키지를 설치한 뒤 다시 빌드하십시오.}}{}%
+\fi
+% 그림 안의 TikZ·pgfplots 기본값. 노션으로 올릴 때 그림만 따로 조판하는 문서도 이 명령을 쓴다.
+\newcommand{\gongbu@figurestyle}{%
+  \tikzset{every picture/.append style={gongbu figure}}%
+  \ifdefined\pgfplotsset\pgfplotsset{every axis/.append style={gongbu axis}}\fi}
+\newcounter{notefigure}
+\newsavebox{\gongbu@figbox}
+\newenvironment{notefigure}[1]{%
+  \par\addvspace{\gongbu@boxskip}%
+  \refstepcounter{notefigure}%
+  \def\gongbu@figcaption{#1}%
+  \setbox\gongbu@figbox=\vbox\bgroup\hsize=\linewidth\linewidth=\hsize
+    \setlength{\parskip}{0pt}\setlength{\parindent}{0pt}\centering\gongbu@figurestyle
+}{%
+    \par\vspace{4pt}%
+    {\sffamily\fontsize{9}{12}\selectfont
+     \leftskip=0.08\linewidth plus 1fil\rightskip=0.08\linewidth plus 1fil\parfillskip=0pt
+     {\color{Accent}\bfseries 그림~\thenotefigure}\hspace{0.7em}\gongbu@figcaption\par}%
+  \egroup
+  \Needspace*{\dimexpr\ht\gongbu@figbox+\dp\gongbu@figbox+2\baselineskip\relax}%
+  \box\gongbu@figbox\par
+  \nopagebreak[4]\vspace{6pt}}
 
 % ------------------------------------------------------------------ 표지
 % 과목(작게) → 차시 제목(크게) → 주제 한 줄 → 짧은 강조선. 밑줄(_)로 이어 붙인 제목을 쓰지 않는다.

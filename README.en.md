@@ -11,7 +11,7 @@ All prompts, rules, CLI output and the detailed documentation under [`docs/`](do
 | Mode | Output |
 |---|---|
 | **faithful** (자료 충실형) | Only the handout and the verified instructor explanation, organized for review. Markdown by default. |
-| **deep** (심화 이해형) | Adds verified background, intermediate reasoning and derivations under each original slide. Print-ready PDF by default. |
+| **deep** (심화 이해형) | Adds verified background, intermediate reasoning and derivations under each original slide, and draws graphs and diagrams the handout lacks. Print-ready PDF by default, with an optional compact print layout. |
 
 The mode selects how far the explanation goes, not which model is used.
 

@@ -22,6 +22,8 @@ STYLE = Path(__file__).with_name("deep_note_style.tex")
 # 기준 디자인의 가변 글꼴. Windows에서 "모든 사용자용"이 아닌 "설치"로 넣은 글꼴은 사용자 폴더에 있다.
 FONT_FILES = ("NotoSerifKR-VF.ttf", "NotoSansKR-VF.ttf")
 FALLBACK_RE = re.compile(r"GONGBU-FONT-FALLBACK (\w+)=([^\r\n]+)")
+# 스타일이 아는 배치. standard는 기준 디자인, compact는 같은 디자인을 인쇄용으로 조밀하게 줄인 것이다.
+LAYOUTS = ("standard", "compact")
 
 
 def font_dir(environ: Mapping[str, str] | None = None) -> str | None:
@@ -53,7 +55,7 @@ def tex_text(value: str) -> str:
 
 
 def render_document(body: str, course: str, session: str, summary: str | None,
-                    korean_font: str | None = None, fonts: str | None = None) -> str:
+                    korean_font: str | None = None, fonts: str | None = None, layout: str = "standard") -> str:
     if not body.strip():
         raise ValueError("DEEP TeX 본문이 비어 있습니다.")
     if re.search(r"\\(?:documentclass\b|begin\s*\{document\}|end\s*\{document\})", body):
@@ -69,8 +71,11 @@ def render_document(body: str, course: str, session: str, summary: str | None,
         raise ValueError(f"DEEP 스타일 경로에 큰따옴표가 있어 TeX에서 불러올 수 없습니다: {style}")
     if fonts is not None and (not fonts.endswith("/") or any(char in fonts for char in '#%{}~^"\\')):
         raise ValueError(f"글꼴 폴더는 /로 끝나는 TeX 경로여야 합니다: {fonts}")
+    if layout not in LAYOUTS:
+        raise ValueError(f"배치는 {' 또는 '.join(LAYOUTS)}이어야 합니다: {layout}")
     values = {
         "FONT_DIR": rf"\newcommand{{\GongbuFontDir}}{{{fonts}}}" if fonts else "",
+        "LAYOUT": rf"\newcommand{{\GongbuLayout}}{{{layout}}}" if layout != "standard" else "",
         "STYLE": style,
         "KOREAN_FONT": font_setup,
         "HEADER_LEFT": tex_text(course),
@@ -81,17 +86,17 @@ def render_document(body: str, course: str, session: str, summary: str | None,
         "BODY": body,
     }
     # Single substitution pass: literal placeholder-like text in the body is preserved.
-    return re.sub(r"%%(FONT_DIR|STYLE|KOREAN_FONT|HEADER_LEFT|HEADER_RIGHT|COURSE|SESSION|SUMMARY|BODY)%%",
+    return re.sub(r"%%(FONT_DIR|LAYOUT|STYLE|KOREAN_FONT|HEADER_LEFT|HEADER_RIGHT|COURSE|SESSION|SUMMARY|BODY)%%",
                   lambda match: values[match[1]], TEMPLATE.read_text(encoding="utf-8"))
 
 
 def build_deep(source: Path, output: Path, course: str, session: str,
-               summary: str | None, korean_font: str | None = None) -> Path:
+               summary: str | None, korean_font: str | None = None, layout: str = "standard") -> Path:
     executable = shutil.which("xelatex")
     if not executable:
         raise ValueError("XeLaTeX가 없습니다. TeX 환경을 준비하십시오. 일반 텍스트 PDF로 대체하지 않습니다.")
     document = render_document(source.read_text(encoding="utf-8-sig"), course,
-                               session, summary, korean_font, font_dir())
+                               session, summary, korean_font, font_dir(), layout)
     # Prevent MiKTeX from installing packages during a build. TeX Live has no
     # on-demand installer and does not accept this MiKTeX-specific flag.
     version = subprocess.run([executable, "--version"], capture_output=True,

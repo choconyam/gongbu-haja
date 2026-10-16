@@ -600,6 +600,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--note-mode", choices=("faithful", "deep"), default=None,
                         help="deep PDF는 deep_note_style.tex를 쓰는 XeLaTeX 경로. faithful/생략은 기존 경로 유지.")
     parser.add_argument("--tex-korean-font", default=None, help="DEEP용 설치된 한글 글꼴 이름(선택)")
+    parser.add_argument("--layout", choices=("standard", "compact"), default=None,
+                        help="DEEP PDF 배치. compact는 여백·글자를 줄인 인쇄용 조밀 배치(생략하면 standard)")
     parser.add_argument("--output", type=Path, required=True, help="만들 파일 경로(.md는 학생용 Markdown, .pdf는 PDF)")
     parser.add_argument("--course", required=True, help="과목명(표지·머리글)")
     parser.add_argument("--session", required=True, help="차시 표기(예: 1주차 2차시)")
@@ -668,12 +670,16 @@ def main(argv: list[str] | None = None) -> int:
                 from .build_deep_pdf import build_deep
             except ImportError:
                 from build_deep_pdf import build_deep
-            build_deep(source, output, args.course, args.session, args.summary, args.tex_korean_font)
+            build_deep(source, output, args.course, args.session, args.summary, args.tex_korean_font,
+                       args.layout or "standard")
         except (ValueError, OSError, subprocess.SubprocessError) as exc:
             print(f"[오류] {exc}", file=sys.stderr)
             return 2
         print(output)
         return 0
+    if args.layout:
+        print("[오류] --layout은 심화 이해형(DEEP) TeX PDF에만 씁니다.", file=sys.stderr)
+        return 2
     try:
         blocked = unsupported_pdf_markup(public_text(source.read_text(encoding="utf-8")))
     except HandoffMemoError as exc:

@@ -117,10 +117,41 @@ class DeepTests(unittest.TestCase):
                          r"\pretocmd{\section}{\Needspace*",
                          r"{\thesection.}",                                    # 절 번호는 1. 2. 형식
                          r"\newcommand{\gongbu@imagepage}[3]",                 # 이미지 교안의 쪽 캡션
-                         "GONGBU-FONT-FALLBACK"):                              # 대체 글꼴 알림
+                         "GONGBU-FONT-FALLBACK",                               # 대체 글꼴 알림
+                         r"\newenvironment{notefigure}", r"그림~\thenotefigure",  # 노트가 그린 그림과 번호 캡션
+                         "{FigMain}{HTML}{1F5FA0}", "{FigAlt}{HTML}{B45309}",   # 색각 이상 구분을 통과한 2도 강조색
+                         "{FigMain},{FigInk,densely dashed},{FigAlt,dashdotted}",  # 흑백 인쇄용 선 모양
+                         "Latex[length=1.9mm,width=1.3mm]",                    # 작은 고전형 화살촉
+                         "every node/.append style={text=Ink}",                # 그림 글자는 곡선 색을 쓰지 않는다
+                         "guide/.style={/tikz/guide,forget plot}",             # 보조선은 곡선 순서를 차지하지 않는다
+                         r"\IfFileExists{pgfplots.sty}",                       # pgfplots 없이도 그림 없는 노트는 빌드
+                         r"\providecommand{\GongbuLayout}{standard}",           # 기본 배치
+                         "top=15mm,bottom=14mm,left=13mm,right=13mm",          # compact 여백
+                         r"\providecommand{\GongbuSlideScale}{0.68}"):          # compact 슬라이드 배율
             self.assertIn(required, style)
         for forbidden in (r"\tableofcontents", "FakeBold=0", "UprightFeatures", "TeX Gyre"):
             self.assertNotIn(forbidden, style)
+
+    def test_layout_is_chosen_before_the_style(self):
+        compact = deep.render_document(BODY, "과목", "00", None, layout="compact")
+        self.assertLess(compact.index(r"\newcommand{\GongbuLayout}{compact}"), compact.index(r"\input{"))
+        self.assertNotIn(r"\GongbuLayout", deep.render_document(BODY, "과목", "00", None))
+        with self.assertRaises(ValueError):
+            deep.render_document(BODY, "과목", "00", None, layout="tiny")
+
+    def test_layout_option_reaches_the_deep_builder_only(self):
+        with tempfile.TemporaryDirectory() as temporary, contextlib.redirect_stderr(io.StringIO()):
+            root = Path(temporary)
+            source = root / "body.tex"
+            source.write_text(BODY, encoding="utf-8")
+            common = [str(source), "--course", "과목", "--session", "00", "--layout", "compact"]
+            with patch.object(deep, "build_deep") as compile_pdf:
+                self.assertEqual(0, builder.main(common + ["--output", str(root / "out.pdf")]))
+            self.assertEqual("compact", compile_pdf.call_args.args[-1])
+            draft = root / "draft.md"
+            draft.write_text("# 제목\n\n본문\n", encoding="utf-8")
+            self.assertEqual(2, builder.main([str(draft), "--course", "과목", "--session", "00", "--layout", "compact",
+                                              "--output", str(root / "draft.pdf")]))
 
     def test_rejects_empty_or_full_document(self):
         for body in (" ", r"\documentclass{article}", r"\begin{document}body"):
@@ -252,6 +283,48 @@ class DeepTests(unittest.TestCase):
             self.assertEqual(3, captions.count("원본PDFp.1"))
             self.assertIn("원본교안", captions)
             self.assertIn("1.행렬덧셈", captions)     # 절 번호는 1. 형식
+
+    @unittest.skipUnless(shutil.which("xelatex") and shutil.which("kpsewhich"), "requires XeLaTeX, pgfplots and a Korean font")
+    def test_figure_gallery_compiles_cleanly(self):
+        """예시 그림 다섯 가지가 넘침·글꼴 누락·참조 오류 없이 조판되고 그림 번호가 붙는다."""
+        if subprocess.run(["kpsewhich", "pgfplots.sty"], capture_output=True).returncode:
+            self.skipTest("pgfplots not installed")
+        from pypdf import PdfReader
+        gallery = deep.STYLE.with_name("deep_figure_gallery.tex")
+        with tempfile.TemporaryDirectory(prefix="deep gallery ") as temporary:
+            work = Path(temporary)
+            command = ["xelatex", "-no-shell-escape", "-interaction=nonstopmode", "-halt-on-error",
+                       f"-output-directory={work}", gallery.name]
+            for _ in range(2):
+                result = subprocess.run(command, cwd=gallery.parent, capture_output=True, timeout=120)
+                self.assertEqual(0, result.returncode, result.stdout.decode("utf-8", "replace")[-2000:])
+            log = (work / "deep_figure_gallery.log").read_text(encoding="utf-8", errors="replace")
+            for problem in ("Overfull", "Missing character", "undefined references", "Size substitutions"):
+                self.assertNotIn(problem, log)
+            text = "".join(page.extract_text() for page in PdfReader(work / "deep_figure_gallery.pdf").pages)
+            compact = text.replace(" ", "")
+            for number in range(1, 6):
+                self.assertIn(f"그림{number}", compact)
+
+    @unittest.skipUnless(shutil.which("xelatex") and shutil.which("kpsewhich"), "requires XeLaTeX, pgfplots and a Korean font")
+    def test_figures_wider_than_the_text_stop_the_build_and_compact_saves_pages(self):
+        if subprocess.run(["kpsewhich", "pgfplots.sty"], capture_output=True).returncode:
+            self.skipTest("pgfplots not installed")
+        from pypdf import PdfReader
+        with tempfile.TemporaryDirectory(prefix="deep figure ") as temporary, contextlib.redirect_stderr(io.StringIO()):
+            root = Path(temporary)
+            source = root / "body.tex"
+            source.write_text("\\begin{notefigure}{너무 넓은 그림}\n\\begin{tikzpicture}\\draw[curve] (0,0) -- (25,1);"
+                              "\\end{tikzpicture}\n\\end{notefigure}\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Overfull"):
+                deep.build_deep(source, root / "wide.pdf", "과목", "00", None)
+            paragraph = "축전기 전압은 시정수마다 남은 차이의 약 37퍼센트만 남기며 최종값에 다가간다. " * 6
+            source.write_text("\n\n".join([paragraph] * 40), encoding="utf-8")
+            pages = {}
+            for layout in deep.LAYOUTS:
+                deep.build_deep(source, root / f"{layout}.pdf", "과목", "00", None, layout=layout)
+                pages[layout] = len(PdfReader(root / f"{layout}.pdf").pages)
+            self.assertLess(pages["compact"], pages["standard"])
 
     @unittest.skipUnless(shutil.which("xelatex"), "requires XeLaTeX and a Korean fallback font")
     def test_fallback_fonts_are_reported(self):
