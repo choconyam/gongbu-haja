@@ -121,6 +121,15 @@ When a finding depends on a transcript, include its verification status. A trans
 
 Judge both directions against one reader: a student meeting the course material for the first time, using only the note. "Obvious" means obvious to that reader, not to the author.
 
+For DEEP, also judge learner understanding against the canonical body structure in `deep-output-contract.md`:
+
+- Does the explanation give a first-time learner enough context to describe the central idea in their own words, rather than repeat an unexplained definition or formula?
+- Does it show which condition or evidence selects the method, equation, comparison criterion, or interpretation, and why that choice helps?
+- Can the learner follow the important transition without supplying an unintroduced prerequisite, a hidden setup decision, or a mental reconstruction of a missing diagram?
+- Does the result have an explained meaning and scope, with any diagram or example connected to that result rather than merely present?
+
+These are DEEP understanding criteria, not extra student quizzes, a separate report, a new reviewer, or another review pass. Judge the actual explanation, not the presence or count of definitions, intermediate equations, figures, or examples. A missing connection that prevents understanding a major point is a substantive explanation defect, not a style preference; identify its location and the unanswered learner question. Do not claim that real students tested the note when they did not.
+
 Suspect an explanation is too thin when it only:
 
 - paraphrases a slide title;
@@ -141,6 +150,8 @@ Also flag a thin spot when the note:
 - answers a question raised earlier, or reuses an earlier definition or result, without pointing back to it;
 - keeps an attribution such as “the instructor stressed X” while the instructor's actual reasoning is missing.
 
+In DEEP, also flag an explanation that starts with a formal definition requiring the intuition it is supposed to teach, expands algebra but leaves the decisive method choice unexplained, or front-loads advanced exceptions before establishing the core idea. Keep essential conditions with the claim from the start; do not remove instructor qualifications to make the text appear simpler.
+
 Suspect the note is padded when it:
 
 - repeats the same warning or claim in several places;
@@ -149,4 +160,4 @@ Suspect the note is padded when it:
 - adds a figure that decorates, redraws a slide that is already readable, or shows nothing the explanation uses;
 - spends body text on workflow notes, such as transcript-error history, “kept as in the lecture,” or traces of earlier corrections.
 
-Repair thinness by answering the missing learner question: what, why, how to read it, when it applies, how it connects, or how to recognize it on an exam, usually in one to three sentences or one intermediate equation. Do not repair it by repeating the same claim in more words. Repair padding by merging or deleting, and use the space for the missing explanation.
+Repair thinness by answering the missing learner question: what, why, how to read it, when it applies, how it connects, or how to recognize it on an exam when the source supports that framing, usually in one to three sentences or one intermediate equation. For DEEP, a short bridge is enough only when it actually resolves the gap; if not, rework the affected explanation and its connections, using a necessary intermediate step, diagram, comparison, or small example. DEEP has no fixed sentence quota. Do not repair thinness by repeating the same claim in more words. Repair padding by merging or deleting, and use the space for the missing explanation. Preserve source coverage, attribution, essential conditions, and uncertainty; do not add surrounding theory or repeat already explained prerequisites just to lengthen the note.
